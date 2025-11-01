@@ -177,7 +177,7 @@ void setup() {
     writeRegister(regs[i]);
     delay(10);
   }
-  Serial.print("setup done!\n");
+  Serial.print("setup done!\n PLL Set to Default: 2400 MHz \n\n Waiting for: \"F= [You'reFrequencyInMHz]\" ");
 }
 
 void loop() 
