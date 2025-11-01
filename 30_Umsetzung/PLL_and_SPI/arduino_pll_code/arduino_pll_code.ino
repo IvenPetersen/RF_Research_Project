@@ -13,7 +13,7 @@
 #define R4_DEFAULT 0x0085003C
 #define R5_DEFAULT 0x00580005
 
-#define REF_FREQ 10   // 25 MHz Reference
+#define REF_FREQ 10   // 10 MHz Reference
 #define MOD_VALUE 4095
 #define PIN_LE 10
 
@@ -84,14 +84,14 @@ void define_MOD_and_FRAC(uint32_t FRACTION){
 // Eingabe in MHz!
 void setFrequency(uint32_t freqMHz)
 {
-  // --- 0) Plausibilitätscheck
+  // Plausibilitätscheck
   if (freqMHz < 138 || freqMHz > 4400) {  // ADF4350: 137.5 MHz … 4.4 GHz
     if (Debug) { Serial.println("Freq out of range"); }
     return;
   }
 
-  // --- 1) Divider wählen, damit Fvco in [2200..4400] MHz liegt
-  uint8_t divSel = 0;   // 0: /1, 1:/2, 2:/4, 3:/8, 4:/16  (R4 D12..D10)
+  // Divider wählen, damit Fvco in [2200..4400] MHz liegt
+  uint8_t divSel = 0;   // 0: /1, 1:/2, 2:/4, 3:/8, 4:/16 
   uint8_t divVal = 1;
   while ((uint64_t)freqMHz * divVal < 2200UL) {   // <== korrekt: 2.2 GHz
     divSel++;
@@ -100,9 +100,8 @@ void setFrequency(uint32_t freqMHz)
   }
   double Fvco_Hz = (double)freqMHz * (double)divVal;
 
-  // --- 2) INT/FRAC berechnen: Fvco = (INT + FRAC/MOD)*fPFD
-  const uint32_t fPFD = REF_FREQ;     // REFIN=25 MHz, R=1, Doubler/2=0
-  //const uint32_t MOD  = MOD_VALUE;    // 4095
+  // INT/FRAC berechnen: Fvco = (INT + FRAC/MOD)*fPFD
+  const uint32_t fPFD = REF_FREQ;  
   double N = Fvco_Hz / (double)fPFD;
   uint32_t INT  = (uint32_t)floor(N);
   uint32_t FRACTION = (uint32_t)((N - (double)INT) * 10);
@@ -110,29 +109,22 @@ void setFrequency(uint32_t freqMHz)
 
   //if (FRAC == MOD) { INT += 1; FRAC = 0; }  // sauber rundungsfest
 
-  // --- Mindest-INT prüfen bei Prescaler 8/9 (PR1=1): INT >= 75
+  // Mindest-INT prüfen bei Prescaler 8/9 (PR1=1): INT >= 75
   if (INT < 75) { if (Debug) Serial.println("INT < 75 (8/9)"); return; }  // :contentReference[oaicite:6]{index=6}
 
-  // --- 3) Register berechnen (siehe Register-Map im DB)
+  // Register berechnen
 
-  // R0 (INT/FRAC)  [DB31..15]=INT, [DB14..3]=FRAC, C3..C1=000
-  ADF4350_REG[0] = (INT << 15) | (FRAC << 3) | 0x0;                                       // :contentReference[oaicite:7]{index=7}
+  // R0 
+  ADF4350_REG[0] = (INT << 15) | (FRAC << 3) | 0x0;                                      
 
-  // R1 (PR1=8/9, PHASE=1, MOD=4095), C3..C1=001
-  // PR1@DB27, PHASE@DB26..15, MOD@DB14..3
+  // R1 (PR1=8/9, PHASE=1, MOD), C3..C1=001
   ADF4350_REG[1] = (1u << 27) | (PHASE << 15) | (MOD << 3) | 0x01;
 
-  // R2 (Low Spur Mode, R=1, CP=2.5mA, DB13=1 für double-buffered Divider, MUXOUT=Digital LD), C3..C1=010
-  // L2:L1@DB30..29=11, MUXOUT@DB28..26=110 (Digital Lock Detect), RD2/RD1=0,
-  // R@[DB23..14]=1, DB13=1, CP@[DB12..9]=0b0111 (2.5mA), U5(LDP)=1, U4(PD_POL)=1
-  ADF4350_REG[2] = 0x4E42;                                      // :contentReference[oaicite:9]{index=9}
+  ADF4350_REG[2] = R2_DEFAULT;                                      
 
-  // R3 (Clock Divider aus, CSR aus), C3..C1=011  – Standardwert ausreichend
-  ADF4350_REG[3] = 0x000004B3;                                                             // :contentReference[oaicite:10]{index=10}
+  // R3 (Clock Divider aus, CSR aus)
+  ADF4350_REG[3] = R3_DEFAULT; 
 
-  // R4 (RF OUT enable, +5 dBm, Feedback=VCO, BS=200, DividerSelect=divSel), C3..C1=100
-  // Feedback Select: DB23=1 → VCO direkt (Loop vor Divider)                               // :contentReference[oaicite:11]{index=11}
-  // Band-Select-Clock-Divider: DB19..12 = 200 (25 MHz / 200 = 125 kHz)                    // :contentReference[oaicite:12]{index=12}
   uint32_t BS = 80u;
   ADF4350_REG[4] =
       (1u << 23) |                  // Feedback = FUNDAMENTAL
@@ -143,15 +135,15 @@ void setFrequency(uint32_t freqMHz)
       4u;                           // C3..C1 = 100 (R4)                                    // :contentReference[oaicite:13]{index=13}
 
   // R5 (LD pin = Digital Lock Detect), C3..C1=101
-  ADF4350_REG[5] = 0x00580005;                                                             // :contentReference[oaicite:14]{index=14}
+  ADF4350_REG[5] = R5_DEFAULT;                                                             // :contentReference[oaicite:14]{index=14}
 
-  // --- 4) Schreiben in empfohlener Init-Reihenfolge
+  // Schreiben
   for (int i = 5; i >= 0; --i) {
     writeRegister(ADF4350_REG[i]);
     delay(10);
   }
 
-  // --- 5) Debug
+  // Debug
   if (Debug) {
     Serial.print("Freq Set: "); Serial.print(freqMHz); Serial.println(" MHz");
     Serial.print("VCO: "); Serial.print(Fvco_Hz / 1e6); Serial.println(" MHz"); // korrekt in MHz
@@ -173,7 +165,7 @@ void writeRegister(uint32_t val) {
 }
 
 void setup() {
-  // put your setup code here, to run once:
+  
   pinMode(PIN_LE, OUTPUT);
   digitalWrite(PIN_LE, HIGH);
   Serial.begin(115200);
@@ -190,7 +182,7 @@ void setup() {
 
 void loop() 
 {
-  // put your main code here, to run repeatedly:
+
   if(Serial.available())
   {
      Serial.print("Message received: "); 
