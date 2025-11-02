@@ -8,7 +8,7 @@ fs = 25000;             % Eingangs-Samplingrate (Mikrofon) in Hz
 fsDAC = 250000;         % Ziel-Samplingrate (DAC) in Hz
 blockSize = 64;        % Samples pro Block vom Mikrofon
 baudRate = 2000000;     
-comPort = "COM7";       % Native USB Port des Arduino Due
+comPort = "COM3";       % Native USB Port des Arduino Due
 
 %% Serielle Verbindung zum Arduino
 try
@@ -38,9 +38,6 @@ ylabel('Amplitude');
 title('Upsampled Audio (250 kHz)');
 grid on;
 drawnow;
-
-%% Ringpuffer vorbereiten (optional)
-audioBuffer = [];
 
 %% Hauptschleife
 while true
