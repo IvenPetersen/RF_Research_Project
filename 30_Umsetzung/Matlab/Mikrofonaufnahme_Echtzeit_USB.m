@@ -41,7 +41,7 @@ drawnow;
 
 %% Hauptschleife
 while true
-    % 1) Block direkt vom Mikrofon
+    % 1) Block direkt vom Mikrofo
     audioBlock = deviceReader();  % blockSize Samples bei 25 kHz
 
     % 2) Auf 250 kHz hochrechnen
@@ -57,6 +57,6 @@ while true
     % 5) In Bytes konvertieren (Little Endian)
     byteBlock = reshape(typecast(audio12bit, 'uint8'), [], 1);
 
-    % 7) Sofort an Arduino senden
+    % 7) 1280 Bytes in einem USB-Paket senden (640 Sampels (mit Upsampling))
     write(arduinoPort, byteBlock, 'uint8');
 end
