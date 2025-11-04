@@ -7,7 +7,7 @@
 fsADC      = 25000;          % Effektive ADC-Samplingrate (nach 10x Downsampling im Arduino)
 blockSize  = 64;            % Anzahl Samples pro USB-Paket (wie im Arduino eingestellt)
 baudRate   = 2000000;        % Baudrate des USB-Serial Kanals
-comPort    = "COM3";         % Native USB-Port des Arduino DUE
+comPort    = "COM7";         % Native USB-Port des Arduino DUE
 
 %% --- Serielle Verbindung öffnen ---
 try
