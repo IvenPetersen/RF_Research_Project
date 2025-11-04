@@ -3,7 +3,7 @@
 #define PIN_LE 10
 #define F_2400_MHZ 0x00780000
 #define F_2600_MHZ 0x00820000 
-#define DEBUG 1
+#define DEBUG_VALUE 1
 #define PHASE 1
 
 //Do not Change R1 to R5
@@ -18,81 +18,80 @@
 #define PIN_LE 10
 
 
+uint8_t Debug = DEBUG_VALUE;
 uint32_t ADF4350_REG[6];
-uint32_t FRAC = 0;
-uint32_t MOD = 2;
 
-// Beispiel-Registerwerte 
-uint32_t regs[6] = {
-  F_2400_MHZ, // R0 – f_PPL
-  R1_DEFAULT, // R1
-  R2_DEFAULT, // R2
-  R3_DEFAULT, // R3
-  R4_DEFAULT, // R4
-  R5_DEFAULT  // R5 – zuerst schreiben
-};
+
+
+
+
 
 typedef struct
 {
-  uint32_t frac;
-  uint32_t mod;
-} reg;
+  uint32_t ADF4350_REG[6];
+  uint32_t FRAC = 0;
+  uint32_t MOD = 2;
+  uint32_t freqMHz = 2400;
+  uint32_t INT;
+  uint32_t FRACTION;
 
-void define_MOD_and_FRAC(uint32_t FRACTION){
+  void define_MOD_and_FRAC()
+  {
+    switch (FRACTION) 
+    {
+      case 1:
+      FRAC = 1;
+      MOD = 10;
+      break;
 
-  switch (FRACTION) {
-    case 1:
-    FRAC = 1;
-    MOD = 10;
-    break;
+      case 2:
+      FRAC = 1;
+      MOD = 10;
+      break;
 
-    case 2:
-    FRAC = 1;
-    MOD = 10;
-    break;
+      case 3:
+      FRAC = 3;
+      MOD = 10;
+      break;
+      
+      case 4:
+      FRAC = 2;
+      MOD = 5;
+      break;
+          
+      case 5:
+      FRAC = 1;
+      MOD = 2;
+      break;
 
-    case 3:
-    FRAC = 3;
-    MOD = 10;
-    break;
-    
-    case 4:
-    FRAC = 2;
-    MOD = 5;
-    break;
-        case 5:
-    FRAC = 1;
-    MOD = 2;
-    break;
+      case 6:
+      FRAC = 3;
+      MOD = 5;
+      break;
 
-    case 6:
-    FRAC = 3;
-    MOD = 5;
-    break;
+      case 7:
+      FRAC = 7;
+      MOD = 10;
+      break;
 
-    case 7:
-    FRAC = 7;
-    MOD = 10;
-    break;
+      case 8:
+      FRAC = 4;
+      MOD = 5;
+      break;
 
-    case 8:
-    FRAC = 4;
-    MOD = 5;
-    break;
-
-    case 9:
-    FRAC = 9;
-    MOD = 10;
-    break;
+      case 9:
+      FRAC = 9;
+      MOD = 10;
+      break;
+    }
+    return;
   }
-  return;
-}
 // Eingabe in MHz!
 void setFrequency(uint32_t freqMHz)
 {
   // Plausibilitätscheck
   if (freqMHz < 138 || freqMHz > 4400) {  // ADF4350: 137.5 MHz … 4.4 GHz
-    if (DEBUG) { Serial.println("Freq out of range"); }
+    if (Debug) { Serial.println("Freq out of range"); }
     return;
   }
 
@@ -102,21 +101,21 @@ void setFrequency(uint32_t freqMHz)
   while ((uint64_t)freqMHz * divVal < 2200UL) {   // <== korrekt: 2.2 GHz
     divSel++;
     divVal <<= 1;
-    if (divSel > 4) { if (DEBUG) Serial.println("Too low for /16"); return; }
+    if (divSel > 4) { if (Debug) Serial.println("Too low for /16"); return; }
   }
   double Fvco_Hz = (double)freqMHz * (double)divVal;
 
   // INT/FRAC berechnen: Fvco = (INT + FRAC/MOD)*fPFD
   const uint32_t fPFD = REF_FREQ;  
   double N = Fvco_Hz / (double)fPFD;
-  uint32_t INT  = (uint32_t)floor(N);
-  uint32_t FRACTION = (uint32_t)((N - (double)INT) * 10);
-  define_MOD_and_FRAC(FRACTION);
+  INT  = (uint32_t)floor(N);
+  FRACTION = (uint32_t)((N - (double)INT) * 10);
+  define_MOD_and_FRAC();
 
   if (FRAC == MOD) { INT += 1; FRAC = 0; }  // sauber rundungsfest
 
   // Mindest-INT prüfen bei Prescaler 8/9 (PR1=1): INT >= 75
-  if (INT < 75) { if (DEBUG) Serial.println("INT < 75 (8/9)"); return; }  // :contentReference[oaicite:6]{index=6}
+  if (INT < 75) { if (Debug) Serial.println("INT < 75 (8/9)"); return; }  // :contentReference[oaicite:6]{index=6}
 
   // Register berechnen
 
@@ -150,7 +149,7 @@ void setFrequency(uint32_t freqMHz)
   }
 
   // Debug
-  if (DEBUG) {
+  if (Debug) {
     Serial.print("Freq Set: "); Serial.print(freqMHz); Serial.println(" MHz");
     Serial.print("VCO: "); Serial.print(Fvco_Hz / 1e6); Serial.println(" MHz"); // korrekt in MHz
     Serial.print("INT="); Serial.print(INT);
@@ -159,6 +158,25 @@ void setFrequency(uint32_t freqMHz)
     for (int i=0;i<6;i++){ Serial.print("R");Serial.print(i);Serial.print("=0x"); Serial.println(ADF4350_REG[i], HEX); }
   }
 }
+} pll;
+
+
+
+
+
+// Beispiel-Registerwerte 
+uint32_t regs[6] = {
+  F_2400_MHZ, // R0 – f_PPL
+  R1_DEFAULT, // R1
+  R2_DEFAULT, // R2
+  R3_DEFAULT, // R3
+  R4_DEFAULT, // R4
+  R5_DEFAULT  // R5 – zuerst schreiben
+};
+
+
+  
+
 
 
 void writeRegister(uint32_t val) {
@@ -186,23 +204,3 @@ void setup() {
   Serial.print("setup done!\n PLL Set to Default: 2400 MHz \n\n Waiting for: \"F= [You'reFrequencyInMHz]\" ");
 }
 
-void loop() 
-{
-
-  if(Serial.available())
-  {
-     Serial.print("Message received: "); 
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    Serial.print(cmd);
-    Serial.print("\n");
-    if(cmd.startsWith("F= "))
-    {
-      uint32_t freq = cmd.substring(3).toInt();
-      Serial.print("substring (freq) is: ");
-      Serial.print(freq, DEC);
-      Serial.print("\n");
-      setFrequency(freq);
-    }
-  }
-}
