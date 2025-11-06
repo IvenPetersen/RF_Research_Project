@@ -7,10 +7,10 @@
 fsADC       = 25000;      % Samplingrate des ADC
 blockSize   = 512;         % USB-Paketgröße
 baudRate    = 2000000;     % Native USB
-comPort     = "COM7";     % COM-Port Arduino Due
+comPort     = "COM6";     % COM-Port Arduino Due
 audioGain   = 0.5;         % Lautstärke (0–1)
 audioBlock  = 1024;        % Schrittgröße für AudioDeviceWriter
-plotInterval = 0.05;       % Zeit zwischen Plot-Updates [s]
+plotInterval = 0.1;       % Zeit zwischen Plot-Updates [s]
 
 %% --- Serielle Verbindung öffnen ---
 try
