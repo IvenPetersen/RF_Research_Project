@@ -4,10 +4,10 @@
 %% ======================================================
 
 %% --- Konfiguration ---
-fsADC       = 25000;      % Samplingrate des ADC
-blockSize   = 512;         % USB-Paketgröße
+fsADC       = 100000;      % Samplingrate des ADC
+blockSize   = 1024;         % USB-Paketgröße
 baudRate    = 2000000;     % Native USB
-comPort     = "COM6";     % COM-Port Arduino Due
+comPort     = "COM3";     % COM-Port Arduino Due
 audioGain   = 0.5;         % Lautstärke (0–1)
 audioBlock  = 1024;        % Schrittgröße für AudioDeviceWriter
 plotInterval = 0.1;       % Zeit zwischen Plot-Updates [s]
@@ -43,7 +43,7 @@ grid on;
 deviceWriter = audioDeviceWriter('SampleRate', fsADC);
 
 % Ringpuffer für kontinuierliche Audio-Ausgabe
-ringBufferSize = 10 * audioBlock;
+ringBufferSize = 10 * audioBlock * 4;
 audioBuffer = zeros(ringBufferSize,1);
 writeIdx = 1;
 readIdx  = 1;
