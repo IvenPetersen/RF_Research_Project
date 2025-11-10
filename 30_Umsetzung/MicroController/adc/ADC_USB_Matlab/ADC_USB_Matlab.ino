@@ -1,6 +1,6 @@
 #include <Arduino.h>
 
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 1024
 #define BLOCKS 8
 
 volatile uint16_t adcBuffer[BLOCKS * BLOCK_SIZE];
@@ -8,7 +8,7 @@ volatile uint32_t writeIndex = 0;
 volatile uint32_t readIndex = 0;
 volatile uint32_t samplesAvailable = 0;
 
-const uint32_t SAMPLE_RATE = 25000; // gewünschte Abtastrate
+const uint32_t SAMPLE_RATE = 100000; // gewünschte Abtastrate
 const uint32_t BAUD = 2000000;
 
 void setup() {
@@ -21,7 +21,6 @@ void setup() {
   // ADC Reset und Konfiguration
   ADC->ADC_CR = ADC_CR_SWRST;
   ADC->ADC_MR = ADC_MR_PRESCAL(10) | ADC_MR_STARTUP_SUT64 | ADC_MR_TRACKTIM(3); 
-  // TRACKTIM etwas erhöhen für stabilere Abtastung
   ADC->ADC_CHER = ADC_CHER_CH7;
 
   // Timer für exakte Abtastung (Interrupt)
@@ -36,37 +35,38 @@ void setup() {
 }
 
 void loop() {
-  static uint8_t outBlock[BLOCK_SIZE * 2];
-
+  // Solange genug Samples verfügbar sind, direkt aus Ringpuffer schreiben
   while (samplesAvailable >= BLOCK_SIZE) {
-    for (uint32_t i = 0; i < BLOCK_SIZE; i++) {
-      uint16_t val = adcBuffer[readIndex++];
-      if (readIndex >= BLOCKS * BLOCK_SIZE) readIndex = 0;
-      samplesAvailable--;
+    uint32_t idx = readIndex;
 
-      outBlock[2*i] = val & 0xFF;
-      outBlock[2*i+1] = (val >> 8) & 0xFF;
+    // Prüfen, ob Block bis zum Ende des Ringpuffers passt
+    if (idx + BLOCK_SIZE <= BLOCKS * BLOCK_SIZE) {
+      // Direkt schreiben
+      SerialUSB.write((uint8_t*)&adcBuffer[idx], BLOCK_SIZE * 2);
+    } else {
+      // Block teilt sich über Ringpuffer-Ende → zwei Teilblöcke
+      uint32_t firstPart = BLOCKS * BLOCK_SIZE - idx;
+      SerialUSB.write((uint8_t*)&adcBuffer[idx], firstPart * 2);
+      SerialUSB.write((uint8_t*)&adcBuffer[0], (BLOCK_SIZE - firstPart) * 2);
     }
-    SerialUSB.write(outBlock, sizeof(outBlock));
+
+    // readIndex und samplesAvailable aktualisieren
+    readIndex = (readIndex + BLOCK_SIZE) % (BLOCKS * BLOCK_SIZE);
+    samplesAvailable -= BLOCK_SIZE;
   }
 }
 
-// Timer Interrupt: ADC Sample holen
+// Timer Interrupt: ADC Sample holen (ohne Mittelung)
 void TC0_Handler() {
-  TC_GetStatus(TC0, 0);
+    TC_GetStatus(TC0, 0);
 
-  // --- Exakte Sampling-Logik ---
-  // Oversampling: 4 Samples mitteln für besseres SNR
-  uint32_t sum = 0;
-  const uint8_t OVERSAMPLE = 4;
-  for (uint8_t j = 0; j < OVERSAMPLE; j++) {
-    ADC->ADC_CR = ADC_CR_START;       // ADC starten
-    while ((ADC->ADC_ISR & ADC_ISR_EOC7) == 0); // Warten auf End-of-Conversion
-    sum += ADC->ADC_CDR[7];
-  }
-  uint16_t sample = sum / OVERSAMPLE;  // Mittelwert
+    // Einfacher ADC-Wert
+    ADC->ADC_CR = ADC_CR_START;
+    while ((ADC->ADC_ISR & ADC_ISR_EOC7) == 0);
+    uint16_t sample = ADC->ADC_CDR[7];
 
-  adcBuffer[writeIndex++] = sample;
-  if (writeIndex >= BLOCKS * BLOCK_SIZE) writeIndex = 0;
-  if (samplesAvailable < BLOCKS * BLOCK_SIZE) samplesAvailable++;
+    // In Ringpuffer schreiben
+    adcBuffer[writeIndex++] = sample;
+    if (writeIndex >= BLOCKS * BLOCK_SIZE) writeIndex = 0;
+    if (samplesAvailable < BLOCKS * BLOCK_SIZE) samplesAvailable++;
 }
