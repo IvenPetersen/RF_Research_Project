@@ -1,14 +1,22 @@
 #include <SPI.h>
-#define MODULATOR_PIN_LE 11
-#define DEBUG 1
+#include "config.h"
 
-uint32_t D_REGS[9] = {0x3E, 0xA0, 0x80, 0x80, 0x80, 0x10, 0x50, 0x06, 0x00};
-
+class LTC5589{
+  public:
+    void setFrequency(uint32_t fMHz);
+    void set_PIN_LE(uint8_t pin_le);
+    void setGain(uint32_t minusGain);
+    void setQDISABLE(bool QDISABLE);
+    void setup();
+    uint8_t pin_le = MOD_PIN_LE;
+    uint32_t registers[9] = {MOD_R1_DEFAULT, MOD_R2_DEFAULT, MOD_R3_DEFAULT, MOD_R4_DEFAULT, MOD_R5_DEFAULT, MOD_R6_DEFAULT, MOD_R7_DEFAULT, MOD_R8_DEFAULT, MOD_R9_DEFAULT};
+    size_t len = sizeof(registers) / sizeof(registers[0]);
+};
 
 // Return the HEX register value for a given LO frequency in MHz.
 // Ranges are [LOWER, UPPER) with UPPER exclusive. 0x04 is f >= 9204 MHz.
 // Returns 0xFF if the frequency is out of all listed ranges.
-uint8_t loRegisterHexForMHz(uint32_t fMHz) {
+void LTC5589::setFrequency(uint32_t fMHz) {
   struct Range { uint16_t lower; uint16_t upper; };
   static const Range R[] = {
     // reg 0x04..0x3D
@@ -136,46 +144,72 @@ uint8_t loRegisterHexForMHz(uint32_t fMHz) {
     { 618,  628},    // 0x7D
     { 609,  618},    // 0x7E
     {   0,  609},    // 0x7F    
-    };
+  };
 
   // Loop over 0x04..0x3D
-  for (uint8_t i = 0; i < sizeof(R)/sizeof(R[0]); ++i) {
+  for (uint32_t i = 0; i < sizeof(R)/sizeof(R[0]); ++i) {
     const uint16_t lo = R[i].lower;
     const uint16_t hi = R[i].upper; // 0 means "no upper bound"
     if (fMHz >= lo && (hi == 0 || fMHz < hi)) {
-      return (uint8_t)(0x04 + i);
+      registers[0] = (0x04 + i);
+      writeRegister(registers, pin_le, len);
+      if(DEBUG){
+        Serial.println("Modulator:  registers set by LTC5589.setFrequency!");
+        for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
+      }
+      return;
     }
   }
-  return 0xFF; // not found
+  Serial.println("Modulator:  ERROR:  Frequency for Modulator LTC5589 out of bound!");
+  registers[0] = 0x3E; // not found
+  Serial.println("Modulator:    Frequency for Modulator LTC5589 set to DEFAULT (2537 to 2591) [registers[0] = 0x3E]. Because LTC5589 out of bound! \n");
+  
+  writeRegister(registers, pin_le, len);
+
 }
  
-
-void writeRegister(uint32_t val, int PIN_LE) {
-  digitalWrite(PIN_LE, LOW);
-  SPI.transfer((val >> 24) & 0xFF);
-  SPI.transfer((val >> 16) & 0xFF);
-  SPI.transfer((val >> 8)  & 0xFF);
-  SPI.transfer(val & 0xFF);
-  digitalWrite(PIN_LE, HIGH);
-}
-void setup() {
-  // put your setup code here, to run once:
-  pinMode(MODULATOR_PIN_LE, OUTPUT);
-  digitalWrite(MODULATOR_PIN_LE, HIGH);
-  Serial.begin(115200);
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
-
-  // Reihenfolge R5→R0
-  for(int i = 8; i >= 0; i--) {
-    writeRegister(D_REGS[i],MODULATOR_PIN_LE);
-    delay(10);
+// set digital Gain from 0dB to -19dB
+void LTC5589::setGain(uint32_t minusGain) {
+  // Clamp to valid range
+  if (minusGain > 19){ 
+    minusGain = 19;
+    Serial.println("Modulator:  WARNING:  minusGain cant be lower then -19dB and is now set to -19dB"); Serial.print("  Modulator:  WARNING:  Youer input was: -"); Serial.print(minusGain); Serial.println("dB.");
   }
-  Serial.print("setup done!\n");
+  // preserve the upper control bits, replace only GAIN[4:0]
+  registers[1] = (registers[1] & ~MOD_MASK_GAIN) | ( (uint8_t)minusGain & MOD_MASK_GAIN);
+  writeRegister(registers, pin_le, len);
+  if(DEBUG){
+    Serial.println("Modulator:  registers set by LTC5589.setGain!");
+    for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
+  }
+}
+
+// give bool QDISABLE. If QDISABLE is true Q is deactivated 
+void LTC5589::setQDISABLE(bool QDISABLE) {
+  uint8_t num = 0;
+  if(QDISABLE){num = 0xFF;}
+
+  registers[1] = (registers[1] & ~MOD_MASK_QDISABLE) | ( num & MOD_MASK_QDISABLE);
+  writeRegister(registers, pin_le, len);
+  if(DEBUG){
+    Serial.println("Modulator:  registers set by LTC5589.setQDISABLE!");
+    for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
+  }
+}
+
+// setup LTC5589 
+// use "LTC5589.set_PIN_LE(uint8_t pin_le)" to change pin_le mid run or check config.h for initial value
+void LTC5589::setup() {
+  pinMode(pin_le, OUTPUT);
+  digitalWrite(pin_le, HIGH);;
+
+  SPI.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE0));
+
+  Serial.println("Modulator:  setup done!");
+
 
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-
+void LTC5589::set_PIN_LE(uint8_t pin_le){
+  pin_le = pin_le;
 }
