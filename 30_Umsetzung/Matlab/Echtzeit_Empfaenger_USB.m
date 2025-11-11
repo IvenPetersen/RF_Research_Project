@@ -1,21 +1,24 @@
 %% ======================================================
 % Echtzeit-Empfänger: ADC-Daten vom Arduino Due empfangen
-% Stabile Audio-Ausgabe + Zeitsignal + FFT
+% Stabile Audio-Ausgabe + Zeitsignal + FFT in Volt (Zero-Padding)
 %% ======================================================
 
 %% --- Konfiguration ---
 fsADC       = 100000;      % Samplingrate des ADC
 blockSize   = 1024;         % USB-Paketgröße
 baudRate    = 2000000;     % Native USB
-comPort     = "COM3";     % COM-Port Arduino Due
+comPort     = "COM7";      % COM-Port Arduino Due
 audioGain   = 0.5;         % Lautstärke (0–1)
 audioBlock  = 1024;        % Schrittgröße für AudioDeviceWriter
 plotInterval = 0.1;       % Zeit zwischen Plot-Updates [s]
 
+%% --- ADC-Konstanten für Umrechnung auf Volt ---
+Vref = 3.3;       % Referenzspannung des ADC
+adcMax = 4095;    % 12-bit ADC
+
 %% --- Serielle Verbindung öffnen ---
 try
     arduinoPort = serialport(comPort, baudRate);
-
     flush(arduinoPort);  % Puffer leeren
 catch
     error("Kann den COM-Port nicht öffnen. Prüfe Verbindung und Native USB Port.");
@@ -35,8 +38,8 @@ grid on; ylim([0 4095]);
 % FFT
 subplot(2,1,2);
 fftLine = plot(nan, nan, 'b');
-xlabel('Frequenz (Hz)'); ylabel('Amplitude');
-title('FFT des ADC-Signals');
+xlabel('Frequenz (Hz)'); ylabel('Amplitude [V]');
+title('FFT des ADC-Signals (Zero-Padding, Volt)');
 grid on;
 
 %% --- Audio-Ausgabe vorbereiten ---
@@ -80,13 +83,20 @@ while true
             addpoints(timeLine, 1:length(adcData), adcData);
         end
         
-        % FFT
+        % ------------------------------
+        % FFT in Volt, ohne Fenster, mit Zero-Padding
+        % ------------------------------
         N = length(adcData);
-        Y = fft(adcData);
-        P2 = abs(Y / N);
-        P1 = P2(1:floor(N/2)+1);
-        P1(2:end-1) = 2*P1(2:end-1);
-        f = fsADC * (0:(N/2)) / N;
+        adcZeroDC = adcData - mean(adcData);      % DC entfernen
+        adcVolt = adcZeroDC / adcMax * Vref;     % Umrechnung auf Volt
+        
+        fftSize = 4*N;                            % 4x Zero-Padding
+        Y = fft(adcVolt, fftSize);
+        P2 = abs(Y / N);                           % Normierung auf ursprüngliche Blockgröße
+        P1 = P2(1:floor(fftSize/2)+1);
+        P1(2:end-1) = 2*P1(2:end-1);             % Einseiten-Spektrum
+        f = fsADC * (0:(fftSize/2)) / fftSize;
+        
         if isvalid(fftLine)
             set(fftLine, 'XData', f, 'YData', P1);
         end
