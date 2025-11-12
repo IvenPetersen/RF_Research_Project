@@ -24,8 +24,9 @@
 
 #define MOD_MASK_GAIN       0x1F
 #define MOD_MASK_QDISABLE   0x20
+
 #define MOD_R1_DEFAULT      0x3E
-#define MOD_R2_DEFAULT      0x84
+#define MOD_R2_DEFAULT      0xA0
 #define MOD_R3_DEFAULT      0x80
 #define MOD_R4_DEFAULT      0x80
 #define MOD_R5_DEFAULT      0x80
