@@ -25,7 +25,7 @@ void loop()
 {  
   if(Serial.available())
   {
-    Serial.println("Message received:"); 
+    Serial.println("Message received: "); 
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     Serial.println(cmd);

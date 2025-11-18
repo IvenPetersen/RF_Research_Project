@@ -53,8 +53,14 @@ void ADF4350::set_PIN_LE(uint8_t pin_le){
 
 void ADF4350::define_MOD_and_FRAC(uint32_t FRACTION)
   {
+    if(DEBUG){Serial.print("PLL: Function ADF4350.define_MOD_and_FRAC( "); Serial.print(FRACTION); Serial.println(" )");}
     switch (FRACTION) 
     {
+      case 0:
+      FRAC = 0;
+      MOD = 2;
+      break;
+
       case 1:
       FRAC = 1;
       MOD = 10;
@@ -62,7 +68,7 @@ void ADF4350::define_MOD_and_FRAC(uint32_t FRACTION)
 
       case 2:
       FRAC = 1;
-      MOD = 10;
+      MOD = 5;
       break;
 
       case 3:
@@ -128,7 +134,7 @@ void ADF4350::setFrequency(uint32_t freqMHz)
     const uint32_t fPFD = PLL_REF_FREQ;  
     double N = Fvco_Hz / (double)fPFD;
     INT  = (uint32_t)floor(N);
-    FRACTION = (uint32_t)((N - (double)INT) * 10);
+    FRACTION = (uint32_t)(((N - (double)INT) + 0.05) * 10);
     define_MOD_and_FRAC(FRACTION);
 
     // if (FRAC == MOD) { INT += 1; FRAC = 0; }  // sauber rundungsfest
@@ -169,8 +175,9 @@ void ADF4350::setFrequency(uint32_t freqMHz)
       Serial.print("PLL:  Freq Set: "); Serial.print(freqMHz); Serial.println(" MHz");
       Serial.print("PLL:  VCO: "); Serial.print(Fvco_Hz / 1e6); Serial.println(" MHz"); 
       Serial.print("PLL:  INT="); Serial.print(INT);
-      Serial.print("PLL:  FRAC="); Serial.print(FRAC);
-      Serial.print("PLL:  DIV=/"); Serial.println(divVal);
-      for (int i=0; i < len; i++){ Serial.print("PLL:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
+      Serial.print(" PLL:  FRAC="); Serial.print(FRAC);
+      Serial.print(" PLL:  N="); Serial.print(N);
+      Serial.print(" PLL:  DIV=/"); Serial.println(divVal);
+      for (int i=0; i < len; i++){ Serial.print(" PLL:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
     }
   }
