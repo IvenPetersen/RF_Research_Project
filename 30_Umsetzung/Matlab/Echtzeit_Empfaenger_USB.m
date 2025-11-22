@@ -7,7 +7,7 @@
 fsADC       = 100000;      % Samplingrate des ADC
 blockSize   = 1024;        % USB-Paketgröße
 baudRate    = 2000000;     % Native USB
-comPort     = "COM3";      % COM-Port Arduino Due
+comPort     = "COM13";     % COM-Port Arduino Due
 audioGain   = 0.5;         % Lautstärke (0–1)
 audioBlock  = 1024;        % Schrittgröße für AudioDeviceWriter
 plotInterval = 0.1;        % Zeit zwischen Plot-Updates [s]
@@ -28,14 +28,15 @@ disp('Empfang läuft...');
 % --- Plot vorbereiten ---
 figure(1); clf;
 
-% Zeitsignal (in Volt)
+% Zeitsignal (in Volt) vorbereiten
 subplot(2,1,1);
 timeLine = animatedline('Color','r');
-xlabel('Sample'); 
+xlabel('Zeit [ms]'); 
 ylabel('Amplitude [V]');
 title('ADC-Zeitsignal (in Volt)');
-grid on; 
-ylim([-Vref/2 Vref/2]);   % symmetrisch um 0V
+grid on;
+ylim([0 Vref]);
+timeWindow = 50; % Zeitsignal-Fenster in ms
 
 % FFT (Amplitude in Volt)
 subplot(2,1,2);
@@ -57,6 +58,9 @@ readIdx  = 1;
 bytesPerSample = 2; % 16-bit pro ADC-Sample
 lastPlotTime = tic;
 
+% --- Zeitzähler für Oszilloskop-Plot ---
+tTotal = 0;
+
 % --- Hauptschleife ---
 while true
 
@@ -76,12 +80,20 @@ while true
     if toc(lastPlotTime) > plotInterval
 
         % --- ZEITSIGNAL IN VOLT ---
-        adcVoltTime = (adcData - mean(adcData)) / adcMax * Vref;  % wie FFT
+        adcVoltTime = (adcData / adcMax) * Vref;  
+
+        % Zeitvektor für aktuellen Block in Millisekunden
+        tBlock = tTotal*1000 + (0:length(adcVoltTime)-1)/fsADC*1000;  % ms
 
         if isvalid(timeLine)
-            clearpoints(timeLine);
-            addpoints(timeLine, 1:length(adcVoltTime), adcVoltTime);
+            addpoints(timeLine, tBlock, adcVoltTime);
         end
+
+        % Scroll-Fenster wie Oszilloskop (ms)
+        ax = subplot(2,1,1);
+        ax.XLim = [max(tBlock)-timeWindow max(tBlock)];
+
+        tTotal = tTotal + length(adcVoltTime)/fsADC;
 
         % --- FFT ---
         N = length(adcData);
