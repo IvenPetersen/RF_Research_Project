@@ -1,0 +1,87 @@
+% --- Arduino Live Plot Setup + Audio (keine Downsampling) ---
+port = "COM14";          
+baud = 2000000;          
+s = serialport(port, baud);
+flush(s);
+
+BLOCK_SIZE = 1024;       
+SAMPLE_RATE = 100000;    % Arduino ADC Samplingrate
+window = 50000;          
+
+% --- Audio Setup ---
+audioFs = SAMPLE_RATE;     % Audio-SampleRate = ADC-SampleRate
+audioGain = 0.5;           
+deviceWriter = audioDeviceWriter('SampleRate', audioFs);
+
+% Ringpuffer für Audio
+ringBufferSize = 8*BLOCK_SIZE; 
+audioBuffer = zeros(ringBufferSize,1);
+writeIdx = 1;
+readIdx  = 1;
+audioBlock = 512;          
+
+% --- Plot Setup ---
+x = zeros(window,1,'uint16');
+t = (0:window-1)/SAMPLE_RATE;
+
+figure;
+h = plot(t, double(x));
+xlabel('Zeit [s]');
+ylabel('ADC Value');
+grid on;
+title('Arduino Live-Plot (kontinuierlich)');
+
+% --- Plot-Update Intervall ---
+plotInterval = 0.05;  
+lastPlotTime = tic;
+
+%% --- Live-Loop ---
+while true
+    % --- 1) Block vom Arduino lesen ---
+    if s.NumBytesAvailable < BLOCK_SIZE*2
+        pause(0.001);
+        continue;
+    end
+
+    block = read(s, BLOCK_SIZE, "uint16");
+    block = block(:);  
+    n = length(block);
+
+    % --- 2) Rolling-Puffer für Plot ---
+    if n >= window
+        x = block(end-window+1:end);
+    else
+        x = [x(n+1:end); block];
+    end
+
+    % --- 3) Plot seltener aktualisieren ---
+    if toc(lastPlotTime) > plotInterval
+        tPlot = (0:length(x)-1)/SAMPLE_RATE;
+        set(h, 'XData', tPlot, 'YData', double(x));
+        drawnow limitrate;
+        lastPlotTime = tic;
+    end
+
+    % --- 4) Audio vorbereiten ---
+    audioSignal = double(block);
+    audioSignal = audioSignal - mean(audioSignal); % DC offset
+    audioSignal = audioSignal / 2048;              % ±1 skaliert
+    audioSignal = audioSignal * audioGain;
+
+    % --- 5) In Ringpuffer schreiben ---
+    nDS = length(audioSignal);
+    idx = writeIdx:writeIdx+nDS-1;
+    idx = mod(idx-1, ringBufferSize)+1;
+    audioBuffer(idx) = audioSignal;
+    writeIdx = mod(writeIdx+nDS-1, ringBufferSize)+1;
+
+    % --- 6) Audio ausgeben ---
+    available = mod(writeIdx - readIdx, ringBufferSize);
+    while available >= audioBlock
+        idx = readIdx:readIdx+audioBlock-1;
+        idx = mod(idx-1, ringBufferSize)+1;
+        step(deviceWriter, audioBuffer(idx));
+        readIdx = mod(readIdx+audioBlock-1, ringBufferSize)+1;
+        available = mod(writeIdx - readIdx, ringBufferSize);
+    end
+end

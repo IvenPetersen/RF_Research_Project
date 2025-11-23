@@ -1,140 +1,148 @@
 %% ======================================================
-% Echtzeit-Empfänger: ADC-Daten vom Arduino Due empfangen
-% Stabile Audio-Ausgabe + Zeitsignal in Volt + FFT in Volt
+% Arduino Due: Live-Audio + Zeitbereich + FFT (Volt)
+% Ringpuffer für kontinuierliche Audio-Ausgabe
 %% ======================================================
 
-% --- Konfiguration ---
-fsADC       = 100000;      % Samplingrate des ADC
-blockSize   = 1024;        % USB-Paketgröße
-baudRate    = 2000000;     % Native USB
-comPort     = "COM13";     % COM-Port Arduino Due
-audioGain   = 0.5;         % Lautstärke (0–1)
-audioBlock  = 1024;        % Schrittgröße für AudioDeviceWriter
-plotInterval = 0.1;        % Zeit zwischen Plot-Updates [s]
+%% --- Konfiguration ---
+port = "COM14";             
+baud = 2000000;             
+BLOCK_SIZE = 1024;          
+SAMPLE_RATE = 48000;        
+BUFFER_SIZE = 8*1024;       
+audioGain = 0.5;            
+plotWindow = 10000;         
+plotInterval = 0.1;         
+fftLength = 4096;           % echte FFT-Samples
+fftLengthZP = 16384;        % Zero-Padded FFT (vierfache Länge)
 
-% --- ADC-Konstanten für Umrechnung auf Volt ---
-Vref   = 3.3;     % Referenzspannung des ADC
-adcMax = 4095;    % 12-bit ADC
+% ADC Konstanten
+Vref   = 3.3;
+adcMax = 4095;
 
-% --- Serielle Verbindung öffnen ---
-try
-    arduinoPort = serialport(comPort, baudRate);
-    flush(arduinoPort);  % Puffer leeren
-catch
-    error("Kann den COM-Port nicht öffnen. Prüfe Verbindung und Native USB Port.");
-end
-disp('Empfang läuft...');
+%% --- Serielle Verbindung ---
+s = serialport(port, baud);
+flush(s);
 
-% --- Plot vorbereiten ---
-figure(1); clf;
+%% --- Ringpuffer ---
+audioBuffer = zeros(BUFFER_SIZE,1);
+bufWriteIdx = 1;
+bufReadIdx  = 1;
 
-% Zeitsignal (in Volt) vorbereiten
+%% --- Audio Player ---
+player = audioDeviceWriter('SampleRate', SAMPLE_RATE, ...
+                          'SupportVariableSizeInput', true);
+
+%% --- Live-Plot Setup ---
+x = zeros(plotWindow,1);
+tPlot = (0:plotWindow-1)/SAMPLE_RATE;
+
+figure;
+
+%% Zeitplot
 subplot(2,1,1);
-timeLine = animatedline('Color','r');
-xlabel('Zeit [ms]'); 
-ylabel('Amplitude [V]');
-title('ADC-Zeitsignal (in Volt)');
-grid on;
+hTime = plot(tPlot, x);
+xlabel('Zeit [s]');
+ylabel('Spannung [V]');
 ylim([0 Vref]);
-timeWindow = 50; % Zeitsignal-Fenster in ms
-
-% FFT (Amplitude in Volt)
-subplot(2,1,2);
-fftLine = plot(nan, nan, 'b');
-xlabel('Frequenz (Hz)'); 
-ylabel('Amplitude [V]');
-title('FFT des ADC-Signals (Zero-Padding, Volt)');
 grid on;
+title('Arduino Live-Zeitbereich (Volt)');
 
-% --- Audio-Ausgabe vorbereiten ---
-deviceWriter = audioDeviceWriter('SampleRate', fsADC);
+%% FFT-Plot
+subplot(2,1,2);
+f = (0:(fftLengthZP/2)) * (SAMPLE_RATE/fftLengthZP);
+hFFT = plot(f, zeros(length(f),1));
+xlabel('Frequenz [Hz]');
+ylabel('Amplitude [V]');
+grid on;
+title('Live-FFT (Zero-Padding, Volt)');
 
-% Ringpuffer für kontinuierliche Audio-Ausgabe
-ringBufferSize = 10 * audioBlock * 4;
-audioBuffer = zeros(ringBufferSize,1);
-writeIdx = 1;
-readIdx  = 1;
-
-bytesPerSample = 2; % 16-bit pro ADC-Sample
 lastPlotTime = tic;
 
-% --- Zeitzähler für Oszilloskop-Plot ---
-tTotal = 0;
+%% --- Main Loop ---
+running = true;
+while running
 
-% --- Hauptschleife ---
-while true
+    %% --- Daten einlesen ---
+    nAvailable = floor(s.NumBytesAvailable/2);
+    if nAvailable > 0
+        data = double(read(s, nAvailable, "uint16"));
+        data = data(:);
 
-    % 1) Prüfen, ob genügend Bytes vorhanden sind
-    numAvailable = arduinoPort.NumBytesAvailable;
-    if numAvailable < blockSize * bytesPerSample
-        pause(0.001);
-        continue;
+        %% Zeitplot in Volt (keine Offsetentfernung)
+        dataVoltPlot = (data / adcMax) * Vref;
+
+        %% Audio normalisieren
+        dataAudio = (data - 2048) / 2048;
+        dataAudio = dataAudio * audioGain;
+
+        %% Ringpuffer schreiben
+        idx = bufWriteIdx : (bufWriteIdx + length(dataAudio) - 1);
+        audioBuffer(mod(idx-1, BUFFER_SIZE)+1) = dataAudio;
+        bufWriteIdx = bufWriteIdx + length(dataAudio);
+
+        %% Rolling Buffer für Zeitplot
+        if length(dataVoltPlot) >= plotWindow
+            x = dataVoltPlot(end-plotWindow+1:end);
+        else
+            x = [x(length(dataVoltPlot)+1:end); dataVoltPlot];
+        end
     end
 
-    % 2) Rohdaten lesen
-    rawData = read(arduinoPort, blockSize * bytesPerSample, 'uint8');
-    adcSamples = typecast(uint8(rawData), 'uint16');
-    adcData = double(adcSamples);
+    %% --- Audio ausgeben ---
+    availableSamples = bufWriteIdx - bufReadIdx;
 
-    % 3) Plot-Update (Zeitsignal + FFT)
+    if availableSamples >= BLOCK_SIZE
+        idx = bufReadIdx:(bufReadIdx+BLOCK_SIZE-1);
+        blockOut = audioBuffer(mod(idx-1, BUFFER_SIZE)+1);
+        step(player, blockOut);
+        bufReadIdx = bufReadIdx + BLOCK_SIZE;
+    else
+        step(player, zeros(BLOCK_SIZE,1));
+    end
+
+
+    %% --- Plot aktualisieren ---
     if toc(lastPlotTime) > plotInterval
 
-        % --- ZEITSIGNAL IN VOLT ---
-        adcVoltTime = (adcData / adcMax) * Vref;  
+        %% Zeitplot aktualisieren
+        tPlot = (0:length(x)-1) / SAMPLE_RATE;
+        set(hTime, 'XData', tPlot, 'YData', x);
 
-        % Zeitvektor für aktuellen Block in Millisekunden
-        tBlock = tTotal*1000 + (0:length(adcVoltTime)-1)/fsADC*1000;  % ms
+        %% ---------- FFT mit ZERO PADDING ----------
+        if length(dataVoltPlot) >= fftLength
 
-        if isvalid(timeLine)
-            addpoints(timeLine, tBlock, adcVoltTime);
-        end
+            fftSamples = dataVoltPlot(end-fftLength+1:end);
 
-        % Scroll-Fenster wie Oszilloskop (ms)
-        ax = subplot(2,1,1);
-        ax.XLim = [max(tBlock)-timeWindow max(tBlock)];
+            % Nur für FFT DC entfernen
+            fftSamples = fftSamples - mean(fftSamples);
 
-        tTotal = tTotal + length(adcVoltTime)/fsADC;
+            N = fftLength;      % Anzahl REALER Samples (NICHT ZP!)
+            NZP = fftLengthZP;  % Zero-Padded Länge
 
-        % --- FFT ---
-        N = length(adcData);
-        adcZeroDC = adcData - mean(adcData);
-        adcVolt = adcZeroDC / adcMax * Vref;
+            % Zero Padding (Amplitude bleibt korrekt)
+            fftIn = [fftSamples; zeros(NZP-N,1)];
 
-        fftSize = 4*N;                         % Zero-Padding
-        Y = fft(adcVolt, fftSize);
-        P2 = abs(Y / N);
-        P1 = P2(1:floor(fftSize/2)+1);
-        P1(2:end-1) = 2*P1(2:end-1);
-        f = fsADC * (0:(fftSize/2)) / fftSize;
+            % FFT
+            Y = fft(fftIn);
 
-        if isvalid(fftLine)
-            set(fftLine, 'XData', f, 'YData', P1);
+            % Amplitudennormalisierung anhand REALER Samplezahl N
+            P2 = abs(Y / N);
+            P1 = P2(1:NZP/2+1);
+            P1(2:end-1) = 2 * P1(2:end-1);
+
+            % Frequenzachse
+            f = SAMPLE_RATE * (0:(NZP/2)) / NZP;
+
+            % Plot aktualisieren
+            set(hFFT, 'XData', f, 'YData', P1);
         end
 
         drawnow limitrate;
         lastPlotTime = tic;
     end
-
-    % 4) Audio vorbereiten
-    audioSignal = adcData - mean(adcData);
-    audioSignal = audioSignal / 2048;   % normalisieren auf ±1
-    audioSignal = audioSignal * audioGain;
-    audioSignal = audioSignal(:);
-
-    % 5) In Ringpuffer schreiben
-    n = length(audioSignal);
-    idx = writeIdx:writeIdx+n-1;
-    idx = mod(idx-1, ringBufferSize)+1;
-    audioBuffer(idx) = audioSignal;
-    writeIdx = mod(writeIdx+n-1, ringBufferSize)+1;
-
-    % 6) Kontinuierlich ausgeben
-    available = mod(writeIdx - readIdx, ringBufferSize);
-    while available >= audioBlock
-        idx = readIdx:readIdx+audioBlock-1;
-        idx = mod(idx-1, ringBufferSize)+1;
-        step(deviceWriter, audioBuffer(idx));
-        readIdx = mod(readIdx+audioBlock-1, ringBufferSize)+1;
-        available = mod(writeIdx - readIdx, ringBufferSize);
-    end
 end
+
+%% Cleanup
+release(player);    
+clear player;
+flush(s);
