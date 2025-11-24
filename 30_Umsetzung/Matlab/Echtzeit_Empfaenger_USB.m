@@ -8,8 +8,8 @@ clc; clear; close all force;
 %% --- Konfiguration ---
 port = "COM14";             
 baud = 2000000;             
-BLOCK_SIZE = 256;            % kleine Blöcke für minimale Latenz
-SAMPLE_RATE = 48000;        
+BLOCK_SIZE = 512;            % 40 kHz -> 256, 80 kHz -> 512
+SAMPLE_RATE = 80000;        
 plotWindow = 500;         
 fftLength = 4096;           % Anzahl Samples für FFT
 fftLengthZP = 16384;        % Zero-Padded FFT
@@ -59,9 +59,11 @@ fftBuffer = zeros(fftLength,1);  % speichert letzte fftLength Samples
 running = true;
 while running
     %% --- Daten einlesen ---
-    nAvailable = floor(s.NumBytesAvailable/2);
+    % Liest Anzahl Samples im Buffer und puffert (1024 Samples pro Paket)
+    nAvailable = floor(s.NumBytesAvailable/2); 
     
-    if nAvailable >= BLOCK_SIZE
+    % Wenn 256 Samples verfügbar, sollen diese gelesen werden
+    if nAvailable >= BLOCK_SIZE 
         data = double(read(s, BLOCK_SIZE, "uint16"));
         data = data(:);
 
