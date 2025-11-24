@@ -31,7 +31,7 @@ void ADF4350::setup() {
   digitalWrite(pin_le, HIGH);
   
 
-  SPI.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE0));
+  
 
   // Reihenfolge R5→R0
 

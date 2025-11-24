@@ -7,7 +7,7 @@ class LTC5589{
     void set_PIN_LE(uint8_t pin_le);
     void setGain(uint32_t minusGain);
     void setQDISABLE(bool QDISABLE);
-    void MOD_writeRegister(uint8_t* data, uint8_t PIN_LE, uint8_t Num);
+    void MOD_writeRegister(uint8_t data[], uint8_t Num);
     void setup();
     uint8_t pin_le = MOD_PIN_LE;
     uint8_t registers[9] = {MOD_R1_DEFAULT, MOD_R2_DEFAULT, MOD_R3_DEFAULT, MOD_R4_DEFAULT, MOD_R5_DEFAULT, MOD_R6_DEFAULT, MOD_R7_DEFAULT, MOD_R8_DEFAULT, MOD_R9_DEFAULT};
@@ -153,7 +153,7 @@ void LTC5589::setFrequency(uint32_t fMHz) {
     const uint16_t hi = R[i].upper; // 0 means "no upper bound"
     if (fMHz >= lo && (hi == 0 || fMHz < hi)) {
       registers[0] = (0x04 + i);
-      MOD_writeRegister(registers, pin_le, len);
+      MOD_writeRegister(registers, len);
       if(DEBUG){
         Serial.println("Modulator:  registers set by LTC5589.setFrequency!");
         for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
@@ -165,7 +165,7 @@ void LTC5589::setFrequency(uint32_t fMHz) {
   registers[0] = 0x3E; // not found
   Serial.println("Modulator:    Frequency for Modulator LTC5589 set to DEFAULT (2537 to 2591) [registers[0] = 0x3E]. Because LTC5589 out of bound! \n");
   
-  MOD_writeRegister(registers, pin_le, len);
+  MOD_writeRegister(registers, len);
 
 }
  
@@ -178,7 +178,7 @@ void LTC5589::setGain(uint32_t minusGain) {
   }
   // preserve the upper control bits, replace only GAIN[4:0]
   registers[1] = (registers[1] & ~MOD_MASK_GAIN) | ( (uint8_t)minusGain & MOD_MASK_GAIN);
-  MOD_writeRegister(registers, pin_le, len);
+  MOD_writeRegister(registers, len);
   if(DEBUG){
     Serial.println("Modulator:  registers set by LTC5589.setGain!");
     for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
@@ -191,7 +191,7 @@ void LTC5589::setQDISABLE(bool QDISABLE) {
   if(QDISABLE){num = 0xFF;}
 
   registers[1] = (registers[1] & ~MOD_MASK_QDISABLE) | ( num & MOD_MASK_QDISABLE);
-  MOD_writeRegister(registers, pin_le, len);
+  MOD_writeRegister(registers, len);
   if(DEBUG){
     Serial.println("Modulator:  registers set by LTC5589.setQDISABLE!");
     for (int i=0; i < len; i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(registers[i], HEX); }
@@ -216,15 +216,19 @@ void LTC5589::set_PIN_LE(uint8_t pin_le){
 }
 
 
-void LTC5589::MOD_writeRegister(uint8_t* data, uint8_t PIN_LE, uint8_t Num) {
+void LTC5589::MOD_writeRegister(uint8_t data[], uint8_t Num) {
+  SPI.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE0));
+
   
-  uint16_t firstByte = 0x00;
-  firstByte = (uint16_t)data[0];
   digitalWrite(pin_le, LOW);
-  SPI.transfer(firstByte);              // first byte = address
-  for (size_t i = 0; i < (Num-1); ++i) {
+  SPI.transfer((uint8_t)0x00);              // first byte = address 
+  for (size_t i = 0; i < (Num); ++i) {
     SPI.transfer(data[i]);              // subsequent bytes = data for addr, addr+1, ...
   }
   digitalWrite(pin_le, HIGH);           // latch on rising edge
   SPI.endTransaction();
+  if(DEBUG){
+  Serial.println("Modulator:  registers written to:");
+  for (int i=0; i < (Num); i++){ Serial.print("Modulator:  R");Serial.print(i);Serial.print(" = 0x"); Serial.println(data[i], HEX); }
+  }
 }
