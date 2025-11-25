@@ -1,6 +1,6 @@
 %% ======================================================
 % Arduino Due: Live-Audio + Zeitbereich + FFT (Volt)
-% Audio, Zeitplot und FFT synchron
+% Audio, Zeitplot und FFT synchron mit Buffer-Diagnose
 %% ======================================================
 
 clc; clear; close all force;
@@ -8,8 +8,8 @@ clc; clear; close all force;
 %% --- Konfiguration ---
 port = "COM14";             
 baud = 2000000;             
-BLOCK_SIZE = 256;            % kleine Blöcke für minimale Latenz
-SAMPLE_RATE = 48000;        
+BLOCK_SIZE = 512;            % 40 kHz -> 256, 80 kHz -> 512
+SAMPLE_RATE = 40000;        
 plotWindow = 500;         
 fftLength = 4096;           % Anzahl Samples für FFT
 fftLengthZP = 16384;        % Zero-Padded FFT
@@ -18,6 +18,9 @@ audioGain = 0.5;
 % ADC Konstanten
 Vref   = 3.3;
 adcMax = 4095;
+
+% Welchen Kanal anzeigen
+channel = 'I';  % 'I' oder 'Q'
 
 %% --- Serielle Verbindung ---
 s = serialport(port, baud);
@@ -57,13 +60,23 @@ fftBuffer = zeros(fftLength,1);  % speichert letzte fftLength Samples
 
 %% --- Main Loop ---
 running = true;
+debugCounter = 0;  % Zähler für limitierte Debug-Ausgabe
+
 while running
     %% --- Daten einlesen ---
-    nAvailable = floor(s.NumBytesAvailable/2);
+    nAvailable = floor(s.NumBytesAvailable/2); 
     
-    if nAvailable >= BLOCK_SIZE
-        data = double(read(s, BLOCK_SIZE, "uint16"));
+    if nAvailable >= BLOCK_SIZE*2
+        data = double(read(s, BLOCK_SIZE*2, "uint16"));
         data = data(:);
+
+        %% --- Nur einen Kanal extrahieren ---
+        switch channel
+            case 'I'
+                data = data(1:2:end);  % I-Samples
+            case 'Q'
+                data = data(2:2:end);  % Q-Samples
+        end
 
         %% --- Zeitbereich in Volt ---
         dataVolt = (data / adcMax) * Vref;
@@ -91,7 +104,6 @@ while running
         P2 = abs(Y/fftLength);
         P1 = P2(1:fftLengthZP/2+1);
         P1(2:end-1) = 2*P1(2:end-1);
-        f = SAMPLE_RATE*(0:(fftLengthZP/2))/fftLengthZP;
 
         % FFT-Plot aktualisieren
         set(hFFT,'XData',f,'YData',P1);
@@ -101,6 +113,13 @@ while running
         set(hTime,'XData',tPlot,'YData',x);
 
         drawnow limitrate;
+
+        %% --- Debug-Ausgabe alle 50 Pakete ---
+        debugCounter = debugCounter + 1;
+        if mod(debugCounter,50) == 0
+            fprintf('NumBytesAvailable: %d | Zeitplot Samples: %d | FFT-Buffer Samples: %d\n', ...
+                    s.NumBytesAvailable, length(x), length(fftBuffer));
+        end
     end
 end
 
