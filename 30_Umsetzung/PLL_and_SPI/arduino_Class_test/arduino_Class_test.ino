@@ -17,8 +17,8 @@ void setup() {
   modulator.setup();
   Serial.flush();
   Serial.println("Waiting for: \"F= [You'reFrequencyInMHz]\" ");
-  Serial.println("Waiting for: \"MOD_NegativGain= [You'reNegativGainIn_dB]\" ");
-  Serial.println("Waiting for: \"MOD_QDISABLE= [1 or 0]\" ");
+  Serial.println("Waiting for: \"MOD_NG= [You'reNegativGainIn_dB]\" for \"MOD_NegativGain\" ");
+  Serial.println("Waiting for: \"MOD_QD= [1 or 0]\" for \"MOD_QDISABLE\" ");
 }
 
 void loop() 
@@ -32,22 +32,27 @@ void loop()
     if(cmd.startsWith("F= "))
     {
       freq = cmd.substring(3).toInt();
-      Serial.print("substring (freq) is: "); Serial.println(freq, DEC);
+      Serial.print("substring (freq in MHz) is: "); Serial.println(freq, DEC);
       
       pll.setFrequency(freq);
       modulator.setFrequency(freq);
     }
-    if(cmd.startsWith("MOD_NegativGain= "))
+    if(cmd.startsWith("MOD_NG= "))
     {
       negativGain = cmd.substring(17).toInt();
       Serial.print("substring (negativGain) is: "); Serial.println(negativGain, DEC);
       modulator.setGain(negativGain);
     }
-    if(cmd.startsWith("MOD_QDISABLE= "))
+    if(cmd.startsWith("MOD_QD= "))
     {
       negativGain = cmd.substring(14).toInt();
       Serial.print("substring (QDISABLE) is: "); Serial.println(negativGain, DEC);
       modulator.setQDISABLE((bool)negativGain);
     }
+    if(cmd.startsWith("help"))
+      Serial.println("HELP:");
+      Serial.println("Waiting for: \"F= [You'reFrequencyInMHz]\" ");
+      Serial.println("Waiting for: \"MOD_NG= [You'reNegativGainIn_dB]\" for \"MOD_NegativGain\" ");
+      Serial.println("Waiting for: \"MOD_QD= [1 or 0]\" for \"MOD_QDISABLE\" ");
   }
 }
