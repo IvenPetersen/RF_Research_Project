@@ -1,12 +1,12 @@
 %% ======================================================
 % Arduino Due: Live-Audio + Zeitbereich + FFT (Volt)
-% Audio, Zeitplot und FFT synchron mit Buffer-Diagnose
+% (angepasst für digitalen Offset-Abzug im Arduino)
 %% ======================================================
 
 clc; clear; close all force;
 
 %% --- Konfiguration ---
-port = "COM14";             
+port = "COM3";             
 baud = 2000000;             
 BLOCK_SIZE = 512;            % 40 kHz -> 256, 80 kHz -> 512
 SAMPLE_RATE = 40000;        
@@ -17,10 +17,10 @@ audioGain = 0.5;
 
 % ADC Konstanten
 Vref   = 3.3;
-adcMax = 4095;
+LSB_V  = Vref / 4096;   % 1 LSB = 3.3V/4096 ≈ 0.8 mV
 
-% Welchen Kanal anzeigen
-channel = 'I';  % 'I' oder 'Q'
+% Kanal auswählen
+channel = 'Q';  % 'I' oder 'Q'
 
 %% --- Serielle Verbindung ---
 s = serialport(port, baud);
@@ -42,7 +42,7 @@ subplot(2,1,1);
 hTime = plot(tPlot, x);
 xlabel('Zeit [s]');
 ylabel('Spannung [V]');
-ylim([0 Vref]);
+ylim([-Vref/2 Vref/2]);   % jetzt zentriert ±1.65V
 grid on;
 title('Arduino Live-Zeitbereich (Volt)');
 
@@ -56,49 +56,57 @@ grid on;
 title('Live-FFT (Zero-Padding, Volt)');
 
 %% --- FFT Rolling Buffer ---
-fftBuffer = zeros(fftLength,1);  % speichert letzte fftLength Samples
+fftBuffer = zeros(fftLength,1);
 
 %% --- Main Loop ---
 running = true;
-debugCounter = 0;  % Zähler für limitierte Debug-Ausgabe
+debugCounter = 0;
 
 while running
-    %% --- Daten einlesen ---
-    nAvailable = floor(s.NumBytesAvailable/2); 
+    %% --- Prüfen, ob genug Daten angekommen sind ---
+    nAvailable = floor(s.NumBytesAvailable/2);
     
     if nAvailable >= BLOCK_SIZE*2
-        data = double(read(s, BLOCK_SIZE*2, "uint16"));
+        %% --- Rohdaten holen (uint16) ---
+        data = read(s, BLOCK_SIZE*2, "uint16");
         data = data(:);
 
-        %% --- Nur einen Kanal extrahieren ---
+        %% --- Rohdaten zu int16 interpretieren ---
+        % Arduino sendet OFFSET-CORRECTED signed 16-bit Werte:
+        % [-2048 ... +2047]
+        data = typecast(uint16(data), 'int16');
+
+        %% --- Nur I oder Q extrahieren ---
         switch channel
             case 'I'
-                data = data(1:2:end);  % I-Samples
+                data = data(1:2:end);
             case 'Q'
-                data = data(2:2:end);  % Q-Samples
+                data = data(2:2:end);
         end
 
-        %% --- Zeitbereich in Volt ---
-        dataVolt = (data / adcMax) * Vref;
+        %% --- Umrechnung in Volt ---
+        % 1 LSB = 3.3/4096 V
+        dataVolt = double(data) * LSB_V;
 
         %% --- Audio normalisieren ---
-        dataAudio = (data - 2048)/2048 * audioGain;
+        % signed 16-bit Bereich: ±2048 entspricht ±1.65 V
+        dataAudio = double(data)/2048 * audioGain;
 
         %% --- Audio ausgeben ---
         step(player, dataAudio);
 
-        %% --- Rolling Buffer für Zeitplot ---
+        %% --- Rolling Buffer Zeitplot ---
         if length(x) >= plotWindow
             x = [x(length(dataVolt)+1:end); dataVolt];
         else
             x = [x; dataVolt];
         end
 
-        %% --- Rolling Buffer für FFT ---
+        %% --- Rolling Buffer FFT ---
         fftBuffer = [fftBuffer(length(dataVolt)+1:end); dataVolt];
 
-        %% --- FFT berechnen ---
-        fftSamples = fftBuffer - mean(fftBuffer);
+        %% --- FFT ---
+        fftSamples = fftBuffer - mean(fftBuffer);  % Gleichanteil weg
         fftIn = [fftSamples; zeros(fftLengthZP - fftLength,1)];
         Y = fft(fftIn);
         P2 = abs(Y/fftLength);
@@ -117,7 +125,7 @@ while running
         %% --- Debug-Ausgabe alle 50 Pakete ---
         debugCounter = debugCounter + 1;
         if mod(debugCounter,50) == 0
-            fprintf('NumBytesAvailable: %d | Zeitplot Samples: %d | FFT-Buffer Samples: %d\n', ...
+            fprintf('NumBytesAvailable: %d | Zeitplot: %d Samples | FFT: %d Samples\n', ...
                     s.NumBytesAvailable, length(x), length(fftBuffer));
         end
     end
