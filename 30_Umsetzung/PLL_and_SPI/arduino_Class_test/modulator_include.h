@@ -6,7 +6,7 @@ class LTC5589{
     void setFrequency(uint32_t fMHz);
     void set_PIN_LE(uint8_t pin_le);
     void setGain(uint32_t minusGain);
-    void setQDISABLE(bool QDISABLE);
+    void setQDISABLE(uint8_t QDISABLE);
     void MOD_writeRegister(uint8_t data[], uint8_t Num);
     void setup();
     uint8_t pin_le = MOD_PIN_LE;
@@ -186,11 +186,15 @@ void LTC5589::setGain(uint32_t minusGain) {
 }
 
 // give bool QDISABLE. If QDISABLE is true Q is deactivated 
-void LTC5589::setQDISABLE(bool QDISABLE) {
-  uint8_t num = 0;
-  if(QDISABLE){num = 0xFF;}
-
-  registers[1] = (registers[1] & ~MOD_MASK_QDISABLE) | ( num & MOD_MASK_QDISABLE);
+void LTC5589::setQDISABLE(uint8_t QDISABLE) {
+  if (QDISABLE == 1){
+    Serial.println("True:");
+    registers[1] |= MOD_MASK_QDISABLE;   // set bit
+  }
+  else{
+    Serial.println("False:");
+    registers[1] &= ~MOD_MASK_QDISABLE;  // clear bit
+  }
   MOD_writeRegister(registers, len);
   if(DEBUG){
     Serial.println("Modulator:  registers set by LTC5589.setQDISABLE!");

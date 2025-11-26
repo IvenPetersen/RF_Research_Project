@@ -3,6 +3,7 @@
 #define DEBUG             1
 #define PLL_PIN_LE        10
 #define MOD_PIN_LE        11
+#define DEMOD_PIN_LE      12
 #define SERIAL_BAUD_RATE  115200
 #define SPI_SPEED         100000
 
@@ -22,8 +23,8 @@
 #define PLL_MOD_VALUE   4095
 
 
-#define MOD_MASK_GAIN       0x1F
-#define MOD_MASK_QDISABLE   0x20
+#define MOD_MASK_GAIN       (0x1F)
+#define MOD_MASK_QDISABLE   (0x20)
 
 #define MOD_R1_DEFAULT      0x3E
 #define MOD_R2_DEFAULT      0xA0
@@ -34,3 +35,5 @@
 #define MOD_R7_DEFAULT      0x50
 #define MOD_R8_DEFAULT      0x06
 #define MOD_R9_DEFAULT      0x00
+
+
