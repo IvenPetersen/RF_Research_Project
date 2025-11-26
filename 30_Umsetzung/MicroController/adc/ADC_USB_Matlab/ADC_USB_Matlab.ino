@@ -16,7 +16,7 @@ volatile uint32_t sampleDelta = 0;        // Delta zum vorherigen Sample
 volatile uint32_t deltaHistory[DELTA_ARRAY];
 volatile uint32_t deltaIndex = 0;
 
-const uint32_t SAMPLE_RATE = 80000;    // 100 kHz
+const uint32_t SAMPLE_RATE = 40000;    // 100 kHz
 const uint32_t BAUD_USB = 2000000;      // Messdaten
 const uint32_t BAUD_DEBUG = 115200;     // Debug-Ausgabe
 

@@ -8,8 +8,8 @@ clc; clear; close all force;
 %% --- Konfiguration ---
 port = "COM14";             
 baud = 2000000;             
-BLOCK_SIZE = 512;            % 40 kHz -> 256, 80 kHz -> 512
-SAMPLE_RATE = 80000;        
+BLOCK_SIZE = 256;            % 40 kHz -> 256, 80 kHz -> 512
+SAMPLE_RATE = 40000;        
 plotWindow = 500;         
 fftLength = 4096;           % Anzahl Samples für FFT
 fftLengthZP = 16384;        % Zero-Padded FFT
