@@ -1,26 +1,31 @@
 %% ======================================================
-% Arduino Due: Live-Audio + Zeitbereich + FFT (Volt)
-% (angepasst für digitalen Offset-Abzug im Arduino)
+% Arduino Due: Live I+Q – Zeit + FFT (Volt)
+% Stereo-Audio: I = links, Q = rechts
+% Zeitplots 0…3.3 V, Audio mit Hochpassfilter
 %% ======================================================
 
 clc; clear; close all force;
 
 %% --- Konfiguration ---
-port = "COM3";             
-baud = 2000000;             
-BLOCK_SIZE = 512;            % 40 kHz -> 256, 80 kHz -> 512
-SAMPLE_RATE = 40000;        
-plotWindow = 500;         
-fftLength = 4096;           % Anzahl Samples für FFT
-fftLengthZP = 16384;        % Zero-Padded FFT
-audioGain = 0.5;            
+port = "COM14";
+baud = 2000000;
+
+BLOCK_SIZE = 512;        
+SAMPLE_RATE = 40000;      
+plotWindow = 500;        
+fftLength = 4096;        
+fftLengthZP = 16384;     
+audioGain = 2;
 
 % ADC Konstanten
 Vref   = 3.3;
-LSB_V  = Vref / 4096;   % 1 LSB = 3.3V/4096 ≈ 0.8 mV
+LSB_V  = Vref / 4096;
 
-% Kanal auswählen
-channel = 'Q';  % 'I' oder 'Q'
+%% --- DC-Blocker Setup (für Audio) ---
+xI_prev = 0; yI_prev = 0;
+xQ_prev = 0; yQ_prev = 0;
+fc = 5;                        % Hochpass-Grenzfrequenz [Hz]
+a = exp(-2*pi*fc/SAMPLE_RATE); % Filterkoeffizient
 
 %% --- Serielle Verbindung ---
 s = serialport(port, baud);
@@ -31,102 +36,127 @@ player = audioDeviceWriter('SampleRate', SAMPLE_RATE, ...
                           'SupportVariableSizeInput', true, ...
                           'BufferSize', BLOCK_SIZE);
 
-%% --- Live-Plot Setup ---
-x = zeros(plotWindow,1);
-tPlot = (0:plotWindow-1)/SAMPLE_RATE;
+%% --- Plot-Puffer (feste Größe, verhindert Fehler) ---
+xI = zeros(plotWindow,1);
+xQ = zeros(plotWindow,1);
 
+fftI = zeros(fftLength,1);
+fftQ = zeros(fftLength,1);
+
+tPlot = (0:plotWindow-1)/SAMPLE_RATE;
+f = (0:(fftLengthZP/2)) * (SAMPLE_RATE/fftLengthZP);
+
+%% --- Grafik ---
 figure;
 
-%% Zeitplot
-subplot(2,1,1);
-hTime = plot(tPlot, x);
-xlabel('Zeit [s]');
-ylabel('Spannung [V]');
-ylim([-Vref/2 Vref/2]);   % jetzt zentriert ±1.65V
-grid on;
-title('Arduino Live-Zeitbereich (Volt)');
+subplot(2,2,1);
+hI_time = plot(tPlot, xI);
+xlabel('Zeit [s]'); ylabel('Volt I'); ylim([0 Vref]);
+grid on; title('I – Zeitbereich');
 
-%% FFT-Plot
-subplot(2,1,2);
-f = (0:(fftLengthZP/2)) * (SAMPLE_RATE/fftLengthZP);
-hFFT = plot(f, zeros(length(f),1));
-xlabel('Frequenz [Hz]');
-ylabel('Amplitude [V]');
-grid on;
-title('Live-FFT (Zero-Padding, Volt)');
+subplot(2,2,2);
+hI_fft = plot(f, zeros(length(f),1));
+xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
+title('I – FFT');
 
-%% --- FFT Rolling Buffer ---
-fftBuffer = zeros(fftLength,1);
+subplot(2,2,3);
+hQ_time = plot(tPlot, xQ);
+xlabel('Zeit [s]'); ylabel('Volt Q'); ylim([0 Vref]);
+grid on; title('Q – Zeitbereich');
+
+subplot(2,2,4);
+hQ_fft = plot(f, zeros(length(f),1));
+xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
+title('Q – FFT');
 
 %% --- Main Loop ---
 running = true;
 debugCounter = 0;
 
 while running
-    %% --- Prüfen, ob genug Daten angekommen sind ---
     nAvailable = floor(s.NumBytesAvailable/2);
-    
+
     if nAvailable >= BLOCK_SIZE*2
-        %% --- Rohdaten holen (uint16) ---
-        data = read(s, BLOCK_SIZE*2, "uint16");
-        data = data(:);
+        % --- Rohdaten holen ---
+        raw = read(s, BLOCK_SIZE*2, "uint16");  
+        raw = raw(:);
 
-        %% --- Rohdaten zu int16 interpretieren ---
-        % Arduino sendet OFFSET-CORRECTED signed 16-bit Werte:
-        % [-2048 ... +2047]
-        data = typecast(uint16(data), 'int16');
+        % --- Zu int16 interpretieren ---
+        raw = typecast(uint16(raw), 'int16');
 
-        %% --- Nur I oder Q extrahieren ---
-        switch channel
-            case 'I'
-                data = data(1:2:end);
-            case 'Q'
-                data = data(2:2:end);
+        % --- I/Q entflechten ---
+        dataI = raw(1:2:end);
+        dataQ = raw(2:2:end);
+        
+        % --- Volt für Zeitplot ---
+        voltI = double(dataI) * LSB_V;
+        voltQ = double(dataQ) * LSB_V;
+
+        %% ================== Audio Stereo mit Hochpass ==================
+        xI_in = double(dataI)/2048 * audioGain;
+        xQ_in = double(dataQ)/2048 * audioGain;
+
+        yI = zeros(size(xI_in));
+        yQ = zeros(size(xQ_in));
+
+        for n = 1:length(xI_in)
+            % Hochpass I
+            x0 = xI_in(n);
+            yI(n) = x0 - xI_prev + a * yI_prev;
+            xI_prev = x0; yI_prev = yI(n);
+
+            % Hochpass Q
+            x0 = xQ_in(n);
+            yQ(n) = x0 - xQ_prev + a * yQ_prev;
+            xQ_prev = x0; yQ_prev = yQ(n);
         end
 
-        %% --- Umrechnung in Volt ---
-        % 1 LSB = 3.3/4096 V
-        dataVolt = double(data) * LSB_V;
-
-        %% --- Audio normalisieren ---
-        % signed 16-bit Bereich: ±2048 entspricht ±1.65 V
-        dataAudio = double(data)/2048 * audioGain;
-
-        %% --- Audio ausgeben ---
+        dataAudio = [yI, yQ];
         step(player, dataAudio);
 
-        %% --- Rolling Buffer Zeitplot ---
-        if length(x) >= plotWindow
-            x = [x(length(dataVolt)+1:end); dataVolt];
-        else
-            x = [x; dataVolt];
-        end
+        %% ================== Rolling Buffer Zeitplots ==================
+        xI = [xI(end-plotWindow+1:end); voltI];
+        xI = xI(end-plotWindow+1:end);
 
-        %% --- Rolling Buffer FFT ---
-        fftBuffer = [fftBuffer(length(dataVolt)+1:end); dataVolt];
+        xQ = [xQ(end-plotWindow+1:end); voltQ];
+        xQ = xQ(end-plotWindow+1:end);
 
-        %% --- FFT ---
-        fftSamples = fftBuffer - mean(fftBuffer);  % Gleichanteil weg
-        fftIn = [fftSamples; zeros(fftLengthZP - fftLength,1)];
-        Y = fft(fftIn);
-        P2 = abs(Y/fftLength);
-        P1 = P2(1:fftLengthZP/2+1);
-        P1(2:end-1) = 2*P1(2:end-1);
+        tPlot = (0:plotWindow-1)/SAMPLE_RATE;
+        set(hI_time,'XData',tPlot,'YData',xI);
+        set(hQ_time,'XData',tPlot,'YData',xQ);
+        ylim(hI_time.Parent,[0 Vref]);
+        ylim(hQ_time.Parent,[0 Vref]);
 
-        % FFT-Plot aktualisieren
-        set(hFFT,'XData',f,'YData',P1);
+        %% ================== Rolling Buffer FFT ====================
+        fftI = [fftI(length(voltI)+1:end); voltI];
+        fftQ = [fftQ(length(voltQ)+1:end); voltQ];
 
-        %% --- Zeitplot aktualisieren ---
-        tPlot = (0:length(x)-1)/SAMPLE_RATE;
-        set(hTime,'XData',tPlot,'YData',x);
+        fftI = fftI(end-fftLength+1:end);
+        fftQ = fftQ(end-fftLength+1:end);
+
+        % --- FFT I ---
+        sI = fftI - mean(fftI); % DC blockweise
+        YI = fft([sI; zeros(fftLengthZP - fftLength,1)]);
+        P2I = abs(YI/fftLength);
+        PI = P2I(1:fftLengthZP/2+1);
+        PI(2:end-1) = 2*PI(2:end-1);
+        set(hI_fft,'XData',f,'YData',PI);
+
+        % --- FFT Q ---
+        sQ = fftQ - mean(fftQ); % DC blockweise
+        YQ = fft([sQ; zeros(fftLengthZP - fftLength,1)]);
+        P2Q = abs(YQ/fftLength);
+        PQ = P2Q(1:fftLengthZP/2+1);
+        PQ(2:end-1) = 2*PQ(2:end-1);
+        set(hQ_fft,'XData',f,'YData',PQ);
 
         drawnow limitrate;
 
-        %% --- Debug-Ausgabe alle 50 Pakete ---
+        %% Debug-Ausgabe
         debugCounter = debugCounter + 1;
         if mod(debugCounter,50) == 0
-            fprintf('NumBytesAvailable: %d | Zeitplot: %d Samples | FFT: %d Samples\n', ...
-                    s.NumBytesAvailable, length(x), length(fftBuffer));
+            fprintf('Bytes: %d | ZeitWindow=%d | FFT=%d\n', ...
+                s.NumBytesAvailable, length(xI), length(fftI));
         end
     end
 end

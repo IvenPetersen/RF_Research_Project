@@ -1,6 +1,7 @@
 %% ======================================================
 % Arduino Due: Live-Audio + Zeitbereich + FFT (Volt)
 % Audio, Zeitplot und FFT synchron
+% DC-Offset wird zuverlässig entfernt (Hochpassfilter)
 %% ======================================================
 
 clc; clear; close all force;
@@ -11,13 +12,19 @@ baud = 2000000;
 BLOCK_SIZE = 256;            % 40 kHz -> 256, 80 kHz -> 512
 SAMPLE_RATE = 40000;        
 plotWindow = 500;         
-fftLength = 4096;           % Anzahl Samples für FFT
-fftLengthZP = 16384;        % Zero-Padded FFT
+fftLength = 4096;           
+fftLengthZP = 16384;        
 audioGain = 0.5;            
 
 % ADC Konstanten
 Vref   = 3.3;
 adcMax = 4095;
+
+%% --- DC-Blocker Setup ---
+x_prev = 0;                    % vorheriger Eingangswert
+y_prev = 0;                    % vorheriger Ausgangswert
+fc = 5;                         % Hochpass-Grenzfrequenz [Hz]
+a = exp(-2*pi*fc/SAMPLE_RATE);  % Filterkoeffizient
 
 %% --- Serielle Verbindung ---
 s = serialport(port, baud);
@@ -53,28 +60,37 @@ grid on;
 title('Live-FFT (Zero-Padding, Volt)');
 
 %% --- FFT Rolling Buffer ---
-fftBuffer = zeros(fftLength,1);  % speichert letzte fftLength Samples
+fftBuffer = zeros(fftLength,1);
 
 %% --- Main Loop ---
 running = true;
 while running
-    %% --- Daten einlesen ---
-    % Liest Anzahl Samples im Buffer und puffert (1024 Samples pro Paket)
-    nAvailable = floor(s.NumBytesAvailable/2); 
     
-    % Wenn 256 Samples verfügbar, sollen diese gelesen werden
-    if nAvailable >= BLOCK_SIZE 
+    %% --- Daten einlesen ---
+    nAvailable = floor(s.NumBytesAvailable/2);
+    
+    if nAvailable >= BLOCK_SIZE
         data = double(read(s, BLOCK_SIZE, "uint16"));
         data = data(:);
 
         %% --- Zeitbereich in Volt ---
         dataVolt = (data / adcMax) * Vref;
 
-        %% --- Audio normalisieren ---
-        dataAudio = (data - 2048)/2048 * audioGain;
+        %% --- Grob-Zentrierung für Audio ---
+        x_in = double(data)/2048 * audioGain;  % Hochpass entfernt den DC
+
+        %% --- DC-Blocker (1. Ordnung Hochpass) ---
+        y = zeros(size(x_in));
+        for n = 1:length(x_in)
+            x0 = x_in(n);
+            y(n) = x0 - x_prev + a * y_prev;
+            x_prev = x0;
+            y_prev = y(n);
+        end
+        dataAudioFiltered = y;
 
         %% --- Audio ausgeben ---
-        step(player, dataAudio);
+        step(player, dataAudioFiltered);
 
         %% --- Rolling Buffer für Zeitplot ---
         if length(x) >= plotWindow
@@ -87,13 +103,12 @@ while running
         fftBuffer = [fftBuffer(length(dataVolt)+1:end); dataVolt];
 
         %% --- FFT berechnen ---
-        fftSamples = fftBuffer - mean(fftBuffer);
+        fftSamples = fftBuffer - mean(fftBuffer);  % DC-Anteil blockweise entfernen
         fftIn = [fftSamples; zeros(fftLengthZP - fftLength,1)];
         Y = fft(fftIn);
         P2 = abs(Y/fftLength);
         P1 = P2(1:fftLengthZP/2+1);
         P1(2:end-1) = 2*P1(2:end-1);
-        f = SAMPLE_RATE*(0:(fftLengthZP/2))/fftLengthZP;
 
         % FFT-Plot aktualisieren
         set(hFFT,'XData',f,'YData',P1);

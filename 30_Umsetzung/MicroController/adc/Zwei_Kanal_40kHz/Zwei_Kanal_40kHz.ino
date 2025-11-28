@@ -138,7 +138,7 @@ void TC0_Handler() {
     // adc_centered = 2048 - ADC
     // Bereich = -2048 ... +2047
     // -------------------------------------------------------
-    int16_t centered = (int16_t)2048 - (int16_t)raw;
+    int16_t centered = (int16_t)raw;
 
     // In Buffer schreiben (I,Q,I,Q,...)
     adcBuffer[writeIndex++] = centered;
