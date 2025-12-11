@@ -20,7 +20,7 @@ fftLengthZP = 16384;
 audioGain = 2;
 
 % FIFO-Kapazität (Samples pro Kanal)
-FIFO_BLOCKS = 128;  % Anzahl Blocks im FIFO (tweakbar). FIFO capacity = FIFO_BLOCKS * BLOCK_SIZE
+FIFO_BLOCKS = 256;  % Anzahl Blocks im FIFO (tweakbar). FIFO capacity = FIFO_BLOCKS * BLOCK_SIZE
 FIFO_CAPACITY = FIFO_BLOCKS * BLOCK_SIZE;
 
 % ADC Konstanten

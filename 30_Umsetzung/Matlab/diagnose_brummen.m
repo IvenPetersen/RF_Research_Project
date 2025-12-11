@@ -7,7 +7,7 @@
 clc; clear; close all force;
 
 %% --- Konfiguration ---
-port = "COM3";
+port = "COM9";
 baud = 2000000;
 
 BLOCK_SIZE = 512;
