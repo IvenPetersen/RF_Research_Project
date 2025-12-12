@@ -122,10 +122,10 @@ try
         if available >= BLOCK_SIZE
             [dataI, dataQ] = fifo_pop(s, BLOCK_SIZE);
 
-            % Pad if not enough data
             if numel(dataI) < BLOCK_SIZE
                 dataI(end+1:BLOCK_SIZE) = int16(0);
             end
+
             if numel(dataQ) < BLOCK_SIZE
                 dataQ(end+1:BLOCK_SIZE) = int16(0);
             end
@@ -133,29 +133,52 @@ try
             plotCounter = plotCounter + 1;
 
             if analogMode
-                % Verarbeitung: Filter + Audio
-                [voltI, voltQ, yI_lp, yQ_lp, zi_hpI, zi_hpQ, zi_lpI, zi_lpQ] = ...
-                    processAnalog(dataI, dataQ, audioGain, LSB_V, ...
-                                  aHP, bLP, aLP, zi_hpI, zi_hpQ, zi_lpI, zi_lpQ);
+                voltI = double(dataI) * LSB_V;
+                voltQ = double(dataQ) * LSB_V;
+
+                xI_in = double(dataI)/2048 * audioGain;
+                xQ_in = double(dataQ)/2048 * audioGain;
+
+                [yI_hp, zi_hpI] = filter([1 -1], [1 -aHP], xI_in, zi_hpI);
+                [yQ_hp, zi_hpQ] = filter([1 -1], [1 -aHP], xQ_in, zi_hpQ);
+
+                [yI_lp, zi_lpI] = filter(bLP, [1 -aLP], yI_hp, zi_lpI);
+                [yQ_lp, zi_lpQ] = filter(bLP, [1 -aLP], yQ_hp, zi_lpQ);
 
                 step(player, [yI_lp, yQ_lp]);
 
-                % Ringbuffer schreiben
                 [xI_buf, xI_idx] = ringbuffer_write(xI_buf, voltI, xI_idx);
                 [xQ_buf, xQ_idx] = ringbuffer_write(xQ_buf, voltQ, xQ_idx);
                 [fftI_buf, fftI_idx] = ringbuffer_write(fftI_buf, voltI, fftI_idx);
                 [fftQ_buf, fftQ_idx] = ringbuffer_write(fftQ_buf, voltQ, fftQ_idx);
 
-                % Plots aktualisieren
                 if mod(plotCounter, 5) == 0
-                    updatePlots(xI_buf, xI_idx, xQ_buf, xQ_idx, ...
-                                fftI_buf, fftI_idx, fftQ_buf, fftQ_idx, ...
-                                hI_time, hQ_time, hI_fft, hQ_fft, ...
-                                plotWindow, fftLength, fftLengthZP);
+                    set(hI_time, 'YData', ringbuffer_linearize(xI_buf, xI_idx, plotWindow));
+                    set(hQ_time, 'YData', ringbuffer_linearize(xQ_buf, xQ_idx, plotWindow));
+
+                    if mod(plotCounter, 10) == 0
+                        sI = ringbuffer_linearize(fftI_buf, fftI_idx, fftLength);
+                        sI = sI - mean(sI);
+                        YI = fft([sI; zeros(fftLengthZP-fftLength,1)]);
+                        P2I = abs(YI/fftLength);
+                        PI = P2I(1:fftLengthZP/2+1);
+                        PI(2:end-1) = 2*PI(2:end-1);
+                        set(hI_fft,'YData', PI);
+
+                        sQ = ringbuffer_linearize(fftQ_buf, fftQ_idx, fftLength);
+                        sQ = sQ - mean(sQ);
+                        YQ = fft([sQ; zeros(fftLengthZP-fftLength,1)]);
+                        P2Q = abs(YQ/fftLength);
+                        PQ = P2Q(1:fftLengthZP/2+1);
+                        PQ(2:end-1) = 2*PQ(2:end-1);
+                        set(hQ_fft,'YData', PQ);
+                    end
+
+                    drawnow limitrate;
                 end
             end
 
-            % FIFO Status
+            %% ---------------- FIFO Status Output ----------------
             if mod(plotCounter, 50) == 0
                 fprintf('FIFO count: %d / %d | writePos=%d readPos=%d\n', ...
                     ud.count, FIFO_CAPACITY, ud.writePos, ud.readPos);
@@ -164,8 +187,10 @@ try
             pause(0.001);
         end
 
-        if analogMode && ~isvalid(player)
-            running = false;
+        if analogMode
+            if ~isvalid(player)
+                running = false;
+            end
         end
     end
 catch ME
@@ -179,56 +204,7 @@ end
 
 flush(s);
 
-%% ---------------- Funktionen ----------------
-
-function [voltI, voltQ, yI_lp, yQ_lp, zi_hpI, zi_hpQ, zi_lpI, zi_lpQ] = ...
-         processAnalog(dataI, dataQ, audioGain, LSB_V, aHP, bLP, aLP, zi_hpI, zi_hpQ, zi_lpI, zi_lpQ)
-    % Spannung
-    voltI = double(dataI) * LSB_V;
-    voltQ = double(dataQ) * LSB_V;
-
-    % Audio
-    xI_in = double(dataI)/2048 * audioGain;
-    xQ_in = double(dataQ)/2048 * audioGain;
-
-    % Hochpassfilter
-    [yI_hp, zi_hpI] = filter([1 -1], [1 -aHP], xI_in, zi_hpI);
-    [yQ_hp, zi_hpQ] = filter([1 -1], [1 -aHP], xQ_in, zi_hpQ);
-
-    % Tiefpassfilter
-    [yI_lp, zi_lpI] = filter(bLP, [1 -aLP], yI_hp, zi_lpI);
-    [yQ_lp, zi_lpQ] = filter(bLP, [1 -aLP], yQ_hp, zi_lpQ);
-end
-
-function updatePlots(xI_buf, xI_idx, xQ_buf, xQ_idx, ...
-                     fftI_buf, fftI_idx, fftQ_buf, fftQ_idx, ...
-                     hI_time, hQ_time, hI_fft, hQ_fft, ...
-                     plotWindow, fftLength, fftLengthZP)
-    % Zeitbereich
-    set(hI_time, 'YData', ringbuffer_linearize(xI_buf, xI_idx, plotWindow));
-    set(hQ_time, 'YData', ringbuffer_linearize(xQ_buf, xQ_idx, plotWindow));
-
-    % FFT I
-    sI = ringbuffer_linearize(fftI_buf, fftI_idx, fftLength);
-    sI = sI - mean(sI);
-    YI = fft([sI; zeros(fftLengthZP-fftLength,1)]);
-    P2I = abs(YI/fftLength);
-    PI = P2I(1:fftLengthZP/2+1);
-    PI(2:end-1) = 2*PI(2:end-1);
-    set(hI_fft,'YData', PI);
-
-    % FFT Q
-    sQ = ringbuffer_linearize(fftQ_buf, fftQ_idx, fftLength);
-    sQ = sQ - mean(sQ);
-    YQ = fft([sQ; zeros(fftLengthZP-fftLength,1)]);
-    P2Q = abs(YQ/fftLength);
-    PQ = P2Q(1:fftLengthZP/2+1);
-    PQ(2:end-1) = 2*PQ(2:end-1);
-    set(hQ_fft,'YData', PQ);
-
-    drawnow limitrate;
-end
-
+%% ---------------- Ringbuffer Helper ----------------
 function [buf, idx] = ringbuffer_write(buf, data, idx)
     L = numel(buf);
     n = numel(data);
@@ -252,6 +228,7 @@ function linear = ringbuffer_linearize(buf, idx, len)
     end
 end
 
+%% ---------------- FIFO Helper ----------------
 function serialCallback(src, ~, BLOCK_SIZE)
     raw = read(src, BLOCK_SIZE*2, 'int16');
     if isempty(raw)
@@ -334,3 +311,5 @@ function [dataI, dataQ] = fifo_pop(sobj, n)
     ud.lock = false;
     sobj.UserData = ud;
 end
+
+

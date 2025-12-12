@@ -45,42 +45,52 @@ player = audioDeviceWriter('SampleRate', SAMPLE_RATE, ...
     'SupportVariableSizeInput', true, ...
     'BufferSize', BLOCK_SIZE);
 
-%% --- Plot-Puffer (feste Größe, verhindert Fehler) ---
-xI = zeros(plotWindow,1);
-xQ = zeros(plotWindow,1);
+%% --- Ringbuffer für effiziente Plots & FFT ---
+xI_buf = zeros(plotWindow,1);
+xQ_buf = zeros(plotWindow,1);
+fftI_buf = zeros(fftLength,1);
+fftQ_buf = zeros(fftLength,1);
 
-fftI = zeros(fftLength,1);
-fftQ = zeros(fftLength,1);
+xI_idx = 1; xQ_idx = 1;
+fftI_idx = 1; fftQ_idx = 1;
 
 tPlot = (0:plotWindow-1)/SAMPLE_RATE;
 f = (0:(fftLengthZP/2)) * (SAMPLE_RATE/fftLengthZP);
 
-%% --- Grafik ---
-figure;
+%% --- Moduswahl: 'analog' oder 'digital' ---
+mode = 'analog'; % 'analog' = Plots + Audio, 'digital' = nur Verarbeitung
 
-subplot(2,2,1);
-hI_time = plot(tPlot, xI);
-xlabel('Zeit [s]'); ylabel('Volt I'); ylim([0 Vref]);
-grid on; title('I – Zeitbereich');
+%% --- Grafik (nur für analog) ---
+if strcmp(mode,'analog')
+    figure;
 
-subplot(2,2,2);
-hI_fft = plot(f, zeros(length(f),1));
-xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
-title('I – FFT');
+    subplot(2,2,1);
+    hI_time = plot(tPlot, xI_buf);
+    xlabel('Zeit [s]'); ylabel('Volt I'); ylim([0 Vref]);
+    grid on; title('I – Zeitbereich');
 
-subplot(2,2,3);
-hQ_time = plot(tPlot, xQ);
-xlabel('Zeit [s]'); ylabel('Volt Q'); ylim([0 Vref]);
-grid on; title('Q – Zeitbereich');
+    subplot(2,2,2);
+    hI_fft = plot(f, zeros(length(f),1));
+    xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
+    title('I – FFT');
 
-subplot(2,2,4);
-hQ_fft = plot(f, zeros(length(f),1));
-xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
-title('Q – FFT');
+    subplot(2,2,3);
+    hQ_time = plot(tPlot, xQ_buf);
+    xlabel('Zeit [s]'); ylabel('Volt Q'); ylim([0 Vref]);
+    grid on; title('Q – Zeitbereich');
+
+    subplot(2,2,4);
+    hQ_fft = plot(f, zeros(length(f),1));
+    xlabel('Frequenz [Hz]'); ylabel('Amplitude'); grid on;
+    title('Q – FFT');
+
+    drawnow;
+end
 
 %% --- Main Loop ---
 running = true;
 debugCounter = 0;
+plotCounter = 0;
 
 while running
 
@@ -114,7 +124,6 @@ while running
         yQ_lp = zeros(size(xQ_in));
 
         for n = 1:length(xI_in)
-
             %% --- Hochpass I (DC-Blocker) ---
             x0 = xI_in(n);
             hp_I = x0 - xI_prev + aHP * yI_prev;
@@ -138,56 +147,54 @@ while running
             %% --- Ergebnis Bandpass ---
             yI(n) = lp_I;
             yQ(n) = lp_Q;
-
         end
 
-        dataAudio = [yI, yQ];
-        step(player, dataAudio);
+        %% --- Audio nur im analog-Modus ---
+        if strcmp(mode,'analog')
+            step(player, [yI, yQ]);
+        end
 
-        %% ================== Rolling Buffer Zeitplots ==================
-        xI = [xI(end-plotWindow+1:end); voltI];
-        xI = xI(end-plotWindow+1:end);
+        %% ================== Ringbuffer Updates nur analog ==================
+        if strcmp(mode,'analog')
+            [xI_buf, xI_idx] = ringbuffer_write(xI_buf, voltI, xI_idx);
+            [xQ_buf, xQ_idx] = ringbuffer_write(xQ_buf, voltQ, xQ_idx);
+            [fftI_buf, fftI_idx] = ringbuffer_write(fftI_buf, voltI, fftI_idx);
+            [fftQ_buf, fftQ_idx] = ringbuffer_write(fftQ_buf, voltQ, fftQ_idx);
 
-        xQ = [xQ(end-plotWindow+1:end); voltQ];
-        xQ = xQ(end-plotWindow+1:end);
+            plotCounter = plotCounter + 1;
 
-        tPlot = (0:plotWindow-1)/SAMPLE_RATE;
-        set(hI_time,'XData',tPlot,'YData',xI);
-        set(hQ_time,'XData',tPlot,'YData',xQ);
+            if mod(plotCounter,5) == 0
+                % --- Zeitbereich ---
+                set(hI_time,'YData', ringbuffer_linearize(xI_buf, xI_idx, plotWindow));
+                set(hQ_time,'YData', ringbuffer_linearize(xQ_buf, xQ_idx, plotWindow));
 
-        ylim(hI_time.Parent,[0 Vref]);
-        ylim(hQ_time.Parent,[0 Vref]);
+                if mod(plotCounter,10) == 0
+                    % --- FFT I ---
+                    sI = ringbuffer_linearize(fftI_buf, fftI_idx, fftLength);
+                    sI = sI - mean(sI);
+                    YI = fft([sI; zeros(fftLengthZP - fftLength,1)]);
+                    P2I = abs(YI/fftLength);
+                    PI = P2I(1:fftLengthZP/2+1); PI(2:end-1) = 2*PI(2:end-1);
+                    set(hI_fft,'YData',PI);
 
-        %% ================== Rolling Buffer FFT ====================
-        fftI = [fftI(length(voltI)+1:end); voltI];
-        fftQ = [fftQ(length(voltQ)+1:end); voltQ];
+                    % --- FFT Q ---
+                    sQ = ringbuffer_linearize(fftQ_buf, fftQ_idx, fftLength);
+                    sQ = sQ - mean(sQ);
+                    YQ = fft([sQ; zeros(fftLengthZP - fftLength,1)]);
+                    P2Q = abs(YQ/fftLength);
+                    PQ = P2Q(1:fftLengthZP/2+1); PQ(2:end-1) = 2*PQ(2:end-1);
+                    set(hQ_fft,'YData',PQ);
+                end
 
-        fftI = fftI(end-fftLength+1:end);
-        fftQ = fftQ(end-fftLength+1:end);
+                drawnow limitrate;
+            end
+        end
 
-        % --- FFT I ---
-        sI = fftI - mean(fftI); % DC blockweise
-        YI = fft([sI; zeros(fftLengthZP - fftLength,1)]);
-        P2I = abs(YI/fftLength);
-        PI = P2I(1:fftLengthZP/2+1);
-        PI(2:end-1) = 2*PI(2:end-1);
-        set(hI_fft,'XData',f,'YData',PI);
-
-        % --- FFT Q ---
-        sQ = fftQ - mean(fftQ); % DC blockweise
-        YQ = fft([sQ; zeros(fftLengthZP - fftLength,1)]);
-        P2Q = abs(YQ/fftLength);
-        PQ = P2Q(1:fftLengthZP/2+1);
-        PQ(2:end-1) = 2*PQ(2:end-1);
-        set(hQ_fft,'XData',f,'YData',PQ);
-
-        drawnow limitrate;
-
-        %% Debug-Ausgabe
+        %% Debug-Ausgabe (immer)
         debugCounter = debugCounter + 1;
         if mod(debugCounter,50) == 0
             fprintf('Bytes: %d | ZeitWindow=%d | FFT=%d\n', ...
-                s.NumBytesAvailable, length(xI), length(fftI));
+                s.NumBytesAvailable, length(xI_buf), length(fftI_buf));
         end
     end
 end
@@ -196,3 +203,26 @@ end
 release(player);
 clear player;
 flush(s);
+
+%% --- Ringbuffer-Helperfunktionen ---
+function [buf, idx] = ringbuffer_write(buf, data, idx)
+    L = numel(buf); n = numel(data);
+    if idx+n-1 <= L
+        buf(idx:idx+n-1) = data;
+        idx = mod(idx+n-1,L)+1;
+    else
+        firstPart = L-idx+1;
+        buf(idx:end) = data(1:firstPart);
+        buf(1:n-firstPart) = data(firstPart+1:end);
+        idx = n-firstPart+1;
+    end
+end
+
+function linear = ringbuffer_linearize(buf, idx, len)
+    linear = [buf(idx:end); buf(1:idx-1)];
+    if numel(linear) < len
+        linear = [linear; zeros(len-numel(linear),1)];
+    else
+        linear = linear(1:len);
+    end
+end
