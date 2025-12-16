@@ -4,7 +4,7 @@ close all force;
 
 %% ===================== Configuration =====================
 % Serieller Port und Baudrate
-port = "COM9";
+port = "COM3   ";
 baud = 2000000;
 
 % Blockgröße für die Verarbeitung und Sample-Rate
